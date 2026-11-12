@@ -1,0 +1,6 @@
+/bin/
+/dist/
+/mdcli
+/mdcli.exe
+*.test
+.DS_Store
