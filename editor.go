@@ -210,7 +210,7 @@ func (e *editor) layout(width, height int) {
 
 func (e *editor) gutter() int { return max(4, len(fmt.Sprint(len(e.lines)))+2) }
 
-func (e *editor) view(width, height int, focused bool) string {
+func (e *editor) view(width, height int) string {
 	rows := make([]string, height)
 	gutter := e.gutter()
 	for y := 0; y < height; y++ {
@@ -220,16 +220,6 @@ func (e *editor) view(width, height int, focused bool) string {
 			continue
 		}
 		line := expandTabs(e.lines[i])
-		if i == e.row && focused {
-			runes := []rune(e.lines[i])
-			start := ansi.StringWidth(expandTabs(string(runes[:e.col])))
-			end := start + 1
-			if e.col < len(runes) {
-				end = max(end, ansi.StringWidth(expandTabs(string(runes[:e.col+1]))))
-			}
-			line += " "
-			line = ansi.Cut(line, 0, start) + lipgloss.NewStyle().Reverse(true).Render(ansi.Cut(line, start, end)) + ansi.Cut(line, end, ansi.StringWidth(line))
-		}
 		prefix := lipgloss.NewStyle().Foreground(lipgloss.Color("#7b8496")).Render(fmt.Sprintf("%*d  ", gutter-2, i+1))
 		visible := ansi.Truncate(ansi.Cut(line, e.left, e.left+max(1, width-gutter)), max(1, width-gutter), "")
 		rows[y] = prefix + visible + strings.Repeat(" ", max(0, width-gutter-ansi.StringWidth(visible)))

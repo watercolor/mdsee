@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/ansi"
+	"charm.land/glamour/v2/styles"
 	"github.com/doug/termtex"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -11,13 +14,25 @@ import (
 )
 
 func renderMarkdown(source string, width int, theme string) (string, error) {
-	renderer, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle(theme),
-		glamour.WithWordWrap(max(10, width)),
-	)
+	renderer, err := newMarkdownRenderer(width, theme)
 	if err != nil {
 		return "", err
 	}
+	return renderWithRenderer(renderer, source, width)
+}
+
+func newMarkdownRenderer(width int, theme string) (*glamour.TermRenderer, error) {
+	style, err := markdownStyles(theme)
+	if err != nil {
+		return nil, err
+	}
+	return glamour.NewTermRenderer(
+		glamour.WithStyles(style),
+		glamour.WithWordWrap(max(10, width)),
+	)
+}
+
+func renderWithRenderer(renderer *glamour.TermRenderer, source string, width int) (string, error) {
 	// Expand tabs only in the preview; terminal tab stops depend on pane position.
 	lines := strings.Split(source, "\n")
 	for i := range lines {
@@ -27,6 +42,35 @@ func renderMarkdown(source string, width int, theme string) (string, error) {
 	expanded := expandMath(source, max(10, width-4))
 	result, err := renderer.Render(expanded)
 	return strings.Trim(result, "\n"), err
+}
+
+func markdownStyles(theme string) (ansi.StyleConfig, error) {
+	style := styles.DarkStyleConfig
+	colors := [6]string{"#f0fdfa", "#5eead4", "#93c5fd", "#c4b5fd", "#a5b4fc", "#cbd5e1"}
+	background := "#115e59"
+	switch theme {
+	case "dark":
+	case "light":
+		style = styles.LightStyleConfig
+		colors = [6]string{"#ffffff", "#0f766e", "#1d4ed8", "#6d28d9", "#4338ca", "#475569"}
+		background = "#0f766e"
+	case "ascii":
+		return styles.ASCIIStyleConfig, nil
+	default:
+		return ansi.StyleConfig{}, fmt.Errorf("未知预览主题：%s", theme)
+	}
+	bold, underline := true, true
+	headings := []*ansi.StyleBlock{&style.H1, &style.H2, &style.H3, &style.H4, &style.H5, &style.H6}
+	for i, heading := range headings {
+		*heading = ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{
+			Bold:  &bold,
+			Color: &colors[i],
+		}}
+	}
+	style.H1.Prefix, style.H1.Suffix = " ", " "
+	style.H1.BackgroundColor = &background
+	style.H2.Underline = &underline
+	return style, nil
 }
 
 func expandMath(source string, width int) string {

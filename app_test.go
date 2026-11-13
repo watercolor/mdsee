@@ -23,10 +23,23 @@ func testModel(t *testing.T) *model {
 func TestViewModesAndFocus(t *testing.T) {
 	m := testModel(t)
 	m.Update(tea.PasteMsg{Content: "draft"})
-	m.Update(press(tea.KeyF6))
+	m.Update(press('w', tea.ModCtrl))
+	m.preview.SetContent(strings.Repeat("preview line\n", 100))
+	m.Update(press(tea.KeyDown))
+	if m.preview.YOffset() != 1 || m.editor.row != 0 {
+		t.Fatal("预览焦点下方向键应滚动预览，不应移动编辑光标")
+	}
+	m.Update(press(tea.KeyUp))
+	if m.preview.YOffset() != 0 {
+		t.Fatal("预览应支持向上滚动")
+	}
 	m.Update(tea.PasteMsg{Content: "must not insert"})
 	if m.editor.text() != "draft" {
 		t.Fatal("预览焦点不应修改原文")
+	}
+	m.Update(press('w', tea.ModCtrl))
+	if m.previewFocus || m.editor.text() != "draft" {
+		t.Fatal("Ctrl+W 应返回编辑区并保留原文")
 	}
 	for _, want := range []viewMode{editMode, previewMode, splitMode} {
 		m.Update(press('p', tea.ModCtrl))
@@ -89,7 +102,7 @@ func TestLayoutFitsTerminal(t *testing.T) {
 		for _, mode := range []viewMode{splitMode, editMode, previewMode} {
 			m.mode = mode
 			m.resize(size[0], size[1])
-			panel := m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight, true), m.editorWidth, true)
+			panel := m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight), m.editorWidth, true)
 			if got := len(strings.Split(panel, "\n")); got != m.bodyHeight+3 {
 				t.Fatalf("panel wrapped: %d rows, want %d", got, m.bodyHeight+3)
 			}
@@ -122,6 +135,46 @@ func TestPrintAndInvalidCLI(t *testing.T) {
 	for _, args := range [][]string{{"--mode", "invalid"}, {"--theme", "invalid"}, {"--width", "0"}, {"--print", path + "missing"}, {"one.md", "two.md"}} {
 		if err := run(args, &out); err == nil {
 			t.Fatalf("应拒绝参数 %v", args)
+		}
+	}
+}
+
+func TestHelpNavigationAndCursorVisibility(t *testing.T) {
+	for _, width := range []int{30, 50, 100, 120} {
+		m := testModel(t)
+		m.vim.enabled = true
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 18})
+		m.Update(press(tea.KeyF1))
+		view := m.View()
+		if view.Cursor != nil {
+			t.Fatal("帮助页不应显示编辑光标")
+		}
+		if !strings.Contains(view.Content, "快捷键指南") {
+			t.Fatal("缺少帮助标题")
+		}
+		if len(strings.Split(view.Content, "\n")) > 18 {
+			t.Fatal("帮助页超出终端高度")
+		}
+		for _, line := range strings.Split(view.Content, "\n") {
+			if ansi.StringWidth(line) > width {
+				t.Fatal("帮助页超出终端宽度")
+			}
+		}
+		m.Update(press(tea.KeyEnd))
+		if !strings.Contains(m.helpViewport.View(), "内部寄存器") {
+			t.Fatal("帮助底部必须可以滚动访问")
+		}
+		m.Update(tea.PasteMsg{Content: "ignored"})
+		if m.editor.text() != "" {
+			t.Fatal("帮助页不能接受编辑输入")
+		}
+		m.Update(press(tea.KeyEscape))
+		if m.help || m.View().Cursor == nil {
+			t.Fatal("关闭帮助后应恢复光标")
+		}
+		m.Update(press('w', tea.ModCtrl))
+		if m.View().Cursor != nil {
+			t.Fatal("预览区不应显示编辑光标")
 		}
 	}
 }

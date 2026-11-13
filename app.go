@@ -27,23 +27,33 @@ type renderedMsg struct {
 	revision int
 	content  string
 	err      error
+	mapping  []scrollAnchor
+	source   string
 }
 
 type model struct {
 	doc                                                  *document
 	editor                                               editor
 	preview                                              viewport.Model
+	helpViewport                                         viewport.Model
 	mode                                                 viewMode
 	theme                                                string
 	width, height, editorWidth, previewWidth, bodyHeight int
 	revision                                             int
 	busy, previewFocus, confirmQuit, help                bool
 	status                                               string
+	vim                                                  vimState
+	linked                                               bool
+	mapping                                              []scrollAnchor
+	mapSource                                            string
+	pendingLineJump                                      int
 }
 
-func newModel(d *document, mode viewMode, theme string) *model {
-	m := &model{doc: d, editor: newEditor(d.text), mode: mode, theme: theme, preview: viewport.New(), status: "F1 帮助"}
+func newModel(d *document, mode viewMode, theme string, vim ...bool) *model {
+	m := &model{doc: d, editor: newEditor(d.text), mode: mode, theme: theme, preview: viewport.New(), helpViewport: viewport.New(), status: "F1 帮助"}
 	m.previewFocus = mode == previewMode
+	m.linked = true
+	m.vim.enabled = len(vim) > 0 && vim[0]
 	m.resize(100, 30)
 	return m
 }
@@ -70,6 +80,7 @@ func (m *model) resize(w, h int) {
 	m.preview.SetWidth(m.previewWidth)
 	m.preview.SetHeight(m.bodyHeight)
 	m.editor.layout(m.editorWidth, m.bodyHeight)
+	m.resizeHelp()
 }
 
 func (m *model) scheduleRender() tea.Cmd {
@@ -82,8 +93,8 @@ func (m *model) startRender() tea.Cmd {
 	m.busy = true
 	revision, source, width, theme := m.revision, m.editor.text(), m.previewWidth, m.theme
 	return func() tea.Msg {
-		content, err := renderMarkdown(source, width, theme)
-		return renderedMsg{revision, content, err}
+		content, mapping, err := renderMappedMarkdown(source, width, theme)
+		return renderedMsg{revision: revision, content: content, err: err, mapping: mapping, source: source}
 	}
 }
 
@@ -117,6 +128,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "预览失败：" + msg.err.Error()
 		} else {
 			m.preview.SetContent(msg.content)
+			m.mapping, m.mapSource = msg.mapping, msg.source
+			if m.pendingLineJump > 0 {
+				m.jumpToSourceLine(m.pendingLineJump - 1)
+			} else if m.previewFocus {
+				m.syncFromPreview()
+			} else {
+				m.syncFromEditor()
+			}
 		}
 		return m, nil
 	case tea.KeyPressMsg:
@@ -135,7 +154,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if key == "ctrl+q" || key == "ctrl+c" {
+		if key == "ctrl+q" || (key == "ctrl+c" && !m.vim.enabled) {
 			if m.dirty() {
 				m.confirmQuit = true
 				return m, nil
@@ -143,42 +162,94 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if key == "f1" {
+			m.vim.clearNavigation()
 			m.help = !m.help
+			if m.help {
+				m.resizeHelp()
+				m.helpViewport.GotoTop()
+			}
 			return m, nil
 		}
 		if m.help {
 			if key == "esc" {
 				m.help = false
+			} else {
+				switch key {
+				case "home", "g":
+					m.helpViewport.GotoTop()
+				case "end", "G":
+					m.helpViewport.GotoBottom()
+				default:
+					m.helpViewport, _ = m.helpViewport.Update(msg)
+				}
 			}
 			return m, nil
 		}
+		if key == "f4" {
+			m.vim.enabled = !m.vim.enabled
+			m.vim.reset()
+			if m.vim.enabled {
+				m.editor.normalCursor()
+			}
+			m.status = "编辑方式：" + m.vim.label()
+			return m, nil
+		}
+		if m.vim.commandOpen {
+			return m, m.commandInput(msg)
+		}
 		switch key {
+		case "f7":
+			m.vim.clearNavigation()
+			m.linked = !m.linked
+			if m.linked {
+				if m.previewFocus {
+					m.syncFromPreview()
+				} else {
+					m.syncFromEditor()
+				}
+			}
+			return m, nil
 		case "ctrl+s", "f2":
+			m.vim.clearNavigation()
 			m.save()
 			return m, nil
 		case "ctrl+p", "f5":
+			m.vim.clearNavigation()
 			m.mode = (m.mode + 1) % 3
 			m.previewFocus = m.mode == previewMode
 			m.resize(m.width, m.height)
 			return m, m.scheduleRender()
-		case "f6":
+		case "ctrl+w", "f6":
+			m.vim.clearNavigation()
 			if m.mode == splitMode {
 				m.previewFocus = !m.previewFocus
 				m.resize(m.width, m.height)
-				return m, m.scheduleRender()
+				return m, nil
 			}
 			return m, nil
 		case "alt+up":
+			m.pendingLineJump = 0
+			m.vim.clearNavigation()
 			m.preview.ScrollUp(3)
+			m.syncFromPreview()
 			return m, nil
 		case "alt+down":
+			m.pendingLineJump = 0
+			m.vim.clearNavigation()
 			m.preview.ScrollDown(3)
+			m.syncFromPreview()
 			return m, nil
 		case "alt+pgup":
+			m.pendingLineJump = 0
+			m.vim.clearNavigation()
 			m.preview.PageUp()
+			m.syncFromPreview()
 			return m, nil
 		case "alt+pgdown":
+			m.pendingLineJump = 0
+			m.vim.clearNavigation()
 			m.preview.PageDown()
+			m.syncFromPreview()
 			return m, nil
 		}
 	}
@@ -186,18 +257,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.confirmQuit || m.help {
 		return m, nil
 	}
+	if m.vim.commandOpen {
+		return m, m.commandInput(msg)
+	}
+	if m.vim.enabled {
+		return m, m.vimInput(msg)
+	}
 	if m.previewFocus {
+		m.pendingLineJump = 0
 		var cmd tea.Cmd
 		m.preview, cmd = m.preview.Update(msg)
+		m.syncFromPreview()
 		return m, cmd
 	}
 	before := m.editor.text()
 	m.editor.update(msg, m.bodyHeight)
-	m.editor.layout(m.editorWidth, m.bodyHeight)
-	if before != m.editor.text() {
-		return m, m.scheduleRender()
-	}
-	return m, nil
+	return m, m.finishEditorInput(before)
 }
 
 func clipped(s string, width int) string { return ansi.Truncate(s, max(1, width), "…") }
@@ -225,50 +300,54 @@ func (m *model) View() tea.View {
 	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#67c8b3")).Render(clipped(" MDCLI  "+filepath.Base(m.doc.path)+mark+"  / "+m.mode.String(), m.width))
 	var body string
 	if m.help {
-		body = lipgloss.NewStyle().Width(m.width).Height(m.bodyHeight + 3).Render(helpText)
+		body = m.helpPanel()
 	} else {
 		switch m.actualMode() {
 		case editMode:
-			body = m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight, !m.previewFocus), m.editorWidth, !m.previewFocus)
+			body = m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight), m.editorWidth, !m.previewFocus)
 		case previewMode:
 			body = m.panel("预览 · ↑↓ / PgUp PgDn", m.preview.View(), m.previewWidth, true)
 		default:
-			left := m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight, !m.previewFocus), m.editorWidth, !m.previewFocus)
+			left := m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight), m.editorWidth, !m.previewFocus)
 			right := m.panel("预览", m.preview.View(), m.previewWidth, m.previewFocus)
 			body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 		}
 	}
-	status := fmt.Sprintf(" %d:%d  %s", m.editor.row+1, m.editor.col+1, m.status)
+	link := "联动关"
+	if m.linked {
+		link = "联动开"
+	}
+	status := fmt.Sprintf(" %s · %s · %d:%d  %s", m.vim.label(), link, m.editor.row+1, m.editor.col+1, m.status)
+	if m.vim.pending != "" || m.vim.count != "" {
+		status += " · " + m.vim.count + m.vim.pending
+	}
+	if m.vim.commandOpen {
+		status = ":" + m.vim.command
+		status = ansi.TruncateLeft(status, max(0, ansi.StringWidth(status)-m.width+1), "")
+	}
 	if m.mode == splitMode && m.width < 70 {
-		status += " · 窄屏单栏，F6 切换"
+		status += " · 窄屏单栏，Ctrl+W/F6 切换"
 	}
 	if m.confirmQuit {
 		status = " 未保存：S 保存并退出 · D 放弃修改 · Esc 返回"
 	}
-	footer := " Ctrl+S 保存  Ctrl+P/F5 切换布局  F6 焦点  Ctrl+Q 退出  F1 帮助"
+	footer := " F4 Vim  F7 联动  Ctrl+W 焦点  Ctrl+S 保存  Ctrl+P 布局  Ctrl+Q 退出  F1 帮助"
 	content := strings.Join([]string{header, body, clipped(status, m.width), clipped(footer, m.width)}, "\n")
 	v := tea.NewView(lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(content))
 	v.AltScreen = true
+	if !m.help && !m.confirmQuit {
+		if m.vim.commandOpen {
+			v.Cursor = tea.NewCursor(ansi.StringWidth(status), m.bodyHeight+4)
+			v.Cursor.Shape = tea.CursorBar
+		} else if !m.previewFocus {
+			x := 1 + m.editor.gutter() + ansi.StringWidth(expandTabs(string([]rune(m.editor.lines[m.editor.row])[:m.editor.col]))) - m.editor.left
+			v.Cursor = tea.NewCursor(x, 3+m.editor.row-m.editor.top)
+			v.Cursor.Shape = tea.CursorBar
+			if m.vim.enabled && !m.vim.insert {
+				v.Cursor.Shape = tea.CursorBlock
+				v.Cursor.Blink = false
+			}
+		}
+	}
 	return v
 }
-
-const helpText = `
- MDCLI · 快捷键
-
- Ctrl+P / F5       双列 → 编辑 → 预览
- F6                双列模式下切换焦点（窄屏切换可见面板）
- Ctrl+S / F2       保存
- Ctrl+Q / Ctrl+C   退出；未保存时提示
- Ctrl+Z / Ctrl+Y   撤销 / 重做
- ↑ ↓ ← →           移动光标；预览焦点下滚动
- Home / End        行首 / 行尾
- Ctrl+Home / End   文档首 / 尾
- PgUp / PgDn       翻页
- Alt+↑ / ↓         编辑时独立滚动预览
- Tab               插入制表符（显示宽度 4）
- Ctrl+K / Ctrl+U   删除至行尾 / 行首
- 终端粘贴快捷键     粘贴文字（支持多行与中文）
-
- LaTeX：$...$ 行内公式，$$...$$ 块公式。
- 公式使用 Unicode 排版；源码保持原样。
- F1 / Esc 关闭帮助。`

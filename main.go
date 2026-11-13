@@ -18,6 +18,7 @@ func run(args []string, out io.Writer) error {
 	theme := fs.String("theme", "dark", "预览主题：dark / light / ascii")
 	printOnly := fs.Bool("print", false, "输出预览后退出（可重定向）")
 	width := fs.Int("width", 80, "--print 输出宽度")
+	vim := fs.Bool("vim", false, "启动时启用 Vim Normal 模式（F4 切换）")
 	fs.Usage = func() {
 		fmt.Fprint(out, "用法：mdcli [选项] [文件.md]\n不指定文件时编辑当前目录的 untitled.md。\n\n")
 		fs.PrintDefaults()
@@ -67,7 +68,7 @@ func run(args []string, out io.Writer) error {
 	if !term.IsTerminal(os.Stdin.Fd()) || !term.IsTerminal(os.Stdout.Fd()) {
 		return fmt.Errorf("交互编辑需要终端；输出预览请使用 --print 文件.md")
 	}
-	_, err = tea.NewProgram(newModel(d, mode, *theme)).Run()
+	_, err = tea.NewProgram(newModel(d, mode, *theme, *vim)).Run()
 	return err
 }
 

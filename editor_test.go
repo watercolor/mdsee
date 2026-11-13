@@ -56,7 +56,7 @@ func TestEditorLongDocumentsAndViewBounds(t *testing.T) {
 	if e.left == 0 {
 		t.Fatal("长行应横向滚动")
 	}
-	for _, line := range strings.Split(e.view(25, 10, true), "\n") {
+	for _, line := range strings.Split(e.view(25, 10), "\n") {
 		if ansi.StringWidth(line) != 25 {
 			t.Fatalf("width %d: %q", ansi.StringWidth(line), line)
 		}
