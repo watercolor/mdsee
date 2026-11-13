@@ -50,10 +50,10 @@ type model struct {
 }
 
 func newModel(d *document, mode viewMode, theme string, vim ...bool) *model {
-	m := &model{doc: d, editor: newEditor(d.text), mode: mode, theme: theme, preview: viewport.New(), helpViewport: viewport.New(), status: "F1 帮助"}
+	m := &model{doc: d, editor: newEditor(d.text), mode: mode, theme: theme, preview: viewport.New(), helpViewport: viewport.New()}
 	m.previewFocus = mode == previewMode
 	m.linked = true
-	m.vim.enabled = len(vim) > 0 && vim[0]
+	m.vim.enabled = len(vim) == 0 || vim[0]
 	m.resize(100, 30)
 	return m
 }
@@ -72,7 +72,7 @@ func (m *model) actualMode() viewMode {
 
 func (m *model) resize(w, h int) {
 	m.width, m.height = max(1, w), max(1, h)
-	m.bodyHeight = max(1, h-7)
+	m.bodyHeight = max(1, h-5)
 	m.editorWidth, m.previewWidth = max(1, w-2), max(1, w-2)
 	if m.actualMode() == splitMode {
 		m.editorWidth, m.previewWidth = w/2-2, w-w/2-2
@@ -317,22 +317,23 @@ func (m *model) View() tea.View {
 	if m.linked {
 		link = "联动开"
 	}
-	status := fmt.Sprintf(" %s · %s · %d:%d  %s", m.vim.label(), link, m.editor.row+1, m.editor.col+1, m.status)
+	status := fmt.Sprintf("%s · %s · %d:%d", m.vim.label(), link, m.editor.row+1, m.editor.col+1)
 	if m.vim.pending != "" || m.vim.count != "" {
 		status += " · " + m.vim.count + m.vim.pending
 	}
+	if m.mode == splitMode && m.width < 70 {
+		status += " · 窄屏"
+	}
+	footer := m.statusLine(status)
 	if m.vim.commandOpen {
 		status = ":" + m.vim.command
 		status = ansi.TruncateLeft(status, max(0, ansi.StringWidth(status)-m.width+1), "")
-	}
-	if m.mode == splitMode && m.width < 70 {
-		status += " · 窄屏单栏，Ctrl+W/F6 切换"
+		footer = lipgloss.NewStyle().Width(m.width).Render(status)
 	}
 	if m.confirmQuit {
-		status = " 未保存：S 保存并退出 · D 放弃修改 · Esc 返回"
+		footer = clipped(" 未保存：S 保存并退出 · D 放弃修改 · Esc 返回", m.width)
 	}
-	footer := " F4 Vim  F7 联动  Ctrl+W 焦点  Ctrl+S 保存  Ctrl+P 布局  Ctrl+Q 退出  F1 帮助"
-	content := strings.Join([]string{header, body, clipped(status, m.width), clipped(footer, m.width)}, "\n")
+	content := strings.Join([]string{header, body, footer}, "\n")
 	v := tea.NewView(lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(content))
 	v.AltScreen = true
 	if !m.help && !m.confirmQuit {
@@ -350,4 +351,27 @@ func (m *model) View() tea.View {
 		}
 	}
 	return v
+}
+
+func (m *model) statusLine(right string) string {
+	right = ansi.Truncate(right, max(0, m.width-1), "…")
+	available := max(0, m.width-ansi.StringWidth(right)-1)
+	left := ""
+	if m.status != "" {
+		left = " " + m.status
+	} else {
+		for _, hint := range []string{
+			" F1 帮助  F4 Vim  F7 联动  Ctrl+W 焦点  Ctrl+P 布局  Ctrl+S 保存  Ctrl+Q 退出",
+			" F1 帮助  Ctrl+P 布局  Ctrl+Q 退出",
+			" F1 帮助",
+		} {
+			if ansi.StringWidth(hint) <= available {
+				left = hint
+				break
+			}
+		}
+	}
+	left = ansi.Truncate(left, available, "…")
+	gap := max(0, m.width-ansi.StringWidth(left)-ansi.StringWidth(right)-1)
+	return left + strings.Repeat(" ", gap) + right + " "
 }

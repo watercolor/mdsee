@@ -18,7 +18,7 @@ func motionModel(t *testing.T) *model {
 		lines = append(lines, fmt.Sprintf("  line %d alpha beta", i))
 	}
 	m.editor = newEditor(strings.Join(lines, "\n"))
-	m.resize(100, 17)
+	m.resize(100, 15)
 	return m
 }
 

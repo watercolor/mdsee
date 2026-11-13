@@ -14,11 +14,11 @@ import (
 func run(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("mdcli", flag.ContinueOnError)
 	fs.SetOutput(out)
-	modeFlag := fs.String("mode", "split", "初始布局：split / edit / preview")
+	modeFlag := fs.String("mode", "preview", "初始布局：split / edit / preview")
 	theme := fs.String("theme", "dark", "预览主题：dark / light / ascii")
 	printOnly := fs.Bool("print", false, "输出预览后退出（可重定向）")
 	width := fs.Int("width", 80, "--print 输出宽度")
-	vim := fs.Bool("vim", false, "启动时启用 Vim Normal 模式（F4 切换）")
+	vim := fs.Bool("vim", true, "启用 Vim Normal 模式，--vim=false 关闭（F4 切换）")
 	fs.Usage = func() {
 		fmt.Fprint(out, "用法：mdcli [选项] [文件.md]\n不指定文件时编辑当前目录的 untitled.md。\n\n")
 		fs.PrintDefaults()

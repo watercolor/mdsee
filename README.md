@@ -1,6 +1,6 @@
 # mdcli
 
-Go 编写的终端 Markdown 编辑器。默认左侧原文、右侧实时预览，支持代码块高亮与 LaTeX 文本公式。无需浏览器、Node.js 或本地 TeX 安装。
+Go 编写的终端 Markdown 编辑器。默认以 Vim Normal 模式打开仅预览界面，支持代码块高亮与 LaTeX 文本公式。按 Ctrl+P / F5 切换到双列或编辑布局。无需浏览器、Node.js 或本地 TeX 安装。
 
 ## 运行
 
@@ -28,7 +28,8 @@ go build -o bin/mdcli.exe .
 - 标题层级：dark / light 主题下一级标题加粗并带底色，二级标题加粗并加下划线，三级至六级加粗并用颜色区分；预览隐藏 `#` 标记。ascii 主题保留纯文本标题标记。
 - 双列 / 仅编辑 / 仅预览；宽度小于 70 列时双列布局自动显示单个面板，通过 Ctrl+W / F6 切换。
 - 编辑与预览默认双向关联滚动：编辑区带动预览，滚动预览也带动原文；F7 可关闭联动，分别浏览。
-- 可选 Vim 核心编辑模式：F4 即时切换，`--vim` 启动时进入 Normal。
+- 默认启用 Vim 核心编辑模式：F4 即时切换，`--vim=false` 可在启动时关闭。
+- 单行底部状态栏：左侧快捷键提示或操作消息，右侧模式、联动状态与光标位置；窄屏自动精简提示。
 - `$...$` 行内公式和 `$$...$$` 块公式，以 Unicode 字符排版。
 - 保留制表符、末尾换行、UTF-8 BOM、统一的 LF 或 CRLF 格式。
 - 保存采用同目录临时文件再重命名；保存前检查外部修改，避免覆盖已检测到的更改。
@@ -122,13 +123,14 @@ F1 帮助按编辑、窗口、浏览、保存分组，宽屏双列、窄屏单�
 ```sh
 mdcli --mode preview notes.md
 mdcli --mode edit notes.md
+mdcli --mode split --vim=false notes.md
 mdcli --vim notes.md
 mdcli --theme light notes.md
 mdcli --print --width 100 notes.md
 mdcli --help
 ```
 
-`--theme` 可选 `dark`、`light`、`ascii`，控制 Markdown 预览样式。`--print` 输出到文件或管道时移除 ANSI 颜色。参数省略时使用双列布局、dark 主题。
+`--theme` 可选 `dark`、`light`、`ascii`，控制 Markdown 预览样式。`--print` 输出到文件或管道时移除 ANSI 颜色。参数省略时使用仅预览布局、Vim Normal 模式和 dark 主题。
 
 ## 公式支持范围
 

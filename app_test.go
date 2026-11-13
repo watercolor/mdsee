@@ -17,7 +17,7 @@ func testModel(t *testing.T) *model {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newModel(d, splitMode, "dark")
+	return newModel(d, splitMode, "dark", false)
 }
 
 func TestViewModesAndFocus(t *testing.T) {
