@@ -86,8 +86,8 @@ func sourceBlocks(source string) []int {
 
 func normalizedLine(line string) string { return strings.Join(strings.Fields(ansi.Strip(line)), " ") }
 
-func renderMappedMarkdown(source string, width int, theme string) (string, []scrollAnchor, error) {
-	renderer, err := newMarkdownRenderer(width, theme)
+func renderMappedMarkdown(source string, width int, theme string, images ...*imageRenderer) (string, []scrollAnchor, error) {
+	renderer, err := newMarkdownRenderer(width, theme, images...)
 	if err != nil {
 		return "", nil, err
 	}

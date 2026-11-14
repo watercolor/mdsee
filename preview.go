@@ -21,10 +21,17 @@ func renderMarkdown(source string, width int, theme string) (string, error) {
 	return renderWithRenderer(renderer, source, width)
 }
 
-func newMarkdownRenderer(width int, theme string) (*glamour.TermRenderer, error) {
+type markdownRenderer interface {
+	Render(string) (string, error)
+}
+
+func newMarkdownRenderer(width int, theme string, images ...*imageRenderer) (markdownRenderer, error) {
 	style, err := markdownStyles(theme)
 	if err != nil {
 		return nil, err
+	}
+	if len(images) > 0 && images[0] != nil && images[0].mode != "off" {
+		return newImageMarkdownRenderer(width, style, images[0]), nil
 	}
 	return glamour.NewTermRenderer(
 		glamour.WithStyles(style),
@@ -32,7 +39,7 @@ func newMarkdownRenderer(width int, theme string) (*glamour.TermRenderer, error)
 	)
 }
 
-func renderWithRenderer(renderer *glamour.TermRenderer, source string, width int) (string, error) {
+func renderWithRenderer(renderer markdownRenderer, source string, width int) (string, error) {
 	// Expand tabs only in the preview; terminal tab stops depend on pane position.
 	lines := strings.Split(source, "\n")
 	for i := range lines {

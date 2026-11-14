@@ -19,6 +19,7 @@ func run(args []string, out io.Writer) error {
 	printOnly := fs.Bool("print", false, "输出预览后退出（可重定向）")
 	width := fs.Int("width", 80, "--print 输出宽度")
 	vim := fs.Bool("vim", true, "启用 Vim Normal 模式，--vim=false 关闭（F4 切换）")
+	images := fs.String("images", "auto", "图片：auto / kitty / blocks / off；--print 输出文字")
 	fs.Usage = func() {
 		fmt.Fprint(out, "用法：mdcli [选项] [文件.md]\n不指定文件时编辑当前目录的 untitled.md。\n\n")
 		fs.PrintDefaults()
@@ -39,6 +40,9 @@ func run(args []string, out io.Writer) error {
 	}
 	if *theme != "dark" && *theme != "light" && *theme != "ascii" {
 		return fmt.Errorf("主题必须为 dark、light 或 ascii")
+	}
+	if *images != "auto" && *images != "kitty" && *images != "blocks" && *images != "off" {
+		return fmt.Errorf("图片模式必须为 auto、kitty、blocks 或 off")
 	}
 	if *width < 20 || *width > 500 {
 		return fmt.Errorf("输出宽度须在 20–500 之间")
@@ -68,7 +72,11 @@ func run(args []string, out io.Writer) error {
 	if !term.IsTerminal(os.Stdin.Fd()) || !term.IsTerminal(os.Stdout.Fd()) {
 		return fmt.Errorf("交互编辑需要终端；输出预览请使用 --print 文件.md")
 	}
-	_, err = tea.NewProgram(newModel(d, mode, *theme, *vim)).Run()
+	m := newModel(d, mode, *theme, *vim)
+	defer m.remoteImages.cancel()
+	m.configureImages(*images)
+	defer func() { _, _ = fmt.Fprint(os.Stdout, deleteImageResources(m.imageIDs)) }()
+	_, err = tea.NewProgram(m).Run()
 	return err
 }
 

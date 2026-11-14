@@ -25,6 +25,7 @@ go build -o bin/mdcli.exe .
 
 - UTF-8 Markdown 编辑：中文、多行粘贴、制表符、行号、长文档滚动、撤销和重做。
 - 实时预览：标题、列表、任务列表、引用、表格、链接、行内代码与代码块语法高亮。
+- 图片预览支持本地文件与 HTTP/HTTPS 网络图片，格式包括 PNG、JPEG、GIF 首帧，可使用 Kitty 原图显示或终端彩色字符预览。
 - 标题层级：dark / light 主题下一级标题加粗并带底色，二级标题加粗并加下划线，三级至六级加粗并用颜色区分；预览隐藏 `#` 标记。ascii 主题保留纯文本标题标记。
 - 双列 / 仅编辑 / 仅预览；宽度小于 70 列时双列布局自动显示单个面板，通过 Ctrl+W / F6 切换。
 - 编辑与预览默认双向关联滚动：编辑区带动预览，滚动预览也带动原文；F7 可关闭联动，分别浏览。
@@ -126,17 +127,53 @@ mdcli --mode edit notes.md
 mdcli --mode split --vim=false notes.md
 mdcli --vim notes.md
 mdcli --theme light notes.md
+mdcli --images blocks examples/images.md
 mdcli --print --width 100 notes.md
 mdcli --help
 ```
 
 `--theme` 可选 `dark`、`light`、`ascii`，控制 Markdown 预览样式。`--print` 输出到文件或管道时移除 ANSI 颜色。参数省略时使用仅预览布局、Vim Normal 模式和 dark 主题。
 
+## 图片预览
+
+图片需独占一个 Markdown 段落，前后用空行分隔：
+
+```markdown
+![图片说明](assets/photo.png)
+
+![含空格的路径](<assets/my photo.jpg>)
+```
+
+相对路径以 Markdown 文件所在目录为基准，支持绝对路径、百分号编码路径、`file:///` 本地绝对路径及引用式图片。网络图片使用 HTTP 或 HTTPS 地址，查询参数会随请求发送，支持重定向。支持 PNG、JPEG 和 GIF 首帧。行内图片、表格中的图片和 HTML `<img>` 保留文字表现。SVG、WebP、GIF 动画和 Mermaid 尚未接入。
+
+```markdown
+![Go 标志](https://go.dev/blog/go-brand/Go-Logo/PNG/Go-Logo_Blue.png)
+```
+
+网络图片自动在后台下载，预览先展示“下载中”，完成后刷新图像和滚动映射。同一地址在当前会话中复用下载缓存，调整窗口或切换布局时重新缩放。最多同时下载 4 张，请求超时为 8 秒。缓存最多保存 32 个地址、32 MiB 图片数据，容量不足时在图片位置显示提示。下载失败的结果保留 30 秒，之后再次编辑文档或调整窗口时可重试。退出会取消尚未完成的下载。
+
+`--images` 控制显示方式：
+
+| 模式 | 行为 |
+| --- | --- |
+| `auto`（默认） | 查询 Kitty Unicode 占位符支持和终端版本；支持占位符或识别为 iTerm2 3.7.3 及以上正式版，且具备真彩色时显示原图，否则使用彩色半块字符预览 |
+| `kitty` | 显式使用 Kitty Unicode 占位符，需要终端支持该特性及真彩色；适用于不支持能力查询的兼容终端 |
+| `blocks` | 将图片缩小为彩色半块字符，适用于普通终端；细节精度低于原图 |
+| `off` | 显示图片说明和路径，关闭本地读取与网络图片下载 |
+
+tmux 内使用 `blocks`，包括显式指定 `kitty` 时；本版未接入 tmux 图片透传。无颜色能力的终端、`NO_COLOR` 非空、`--theme ascii` 或 `--print` 时使用文字形式。彩色字符在 256 色终端上由终端渲染库降低颜色精度。
+
+iTerm2 的自动识别使用终端实际返回的名称和版本，不依赖 `TERM_PROGRAM` 环境变量。iTerm2 3.7.3 及以上正式版可直接运行 `./bin/mdcli examples/images.md`；未识别的版本仍可用 `--images kitty` 手动尝试。版本下限依据 [iTerm2 更新记录](https://iterm2.com/downloads.html)中对图片 ID 高位占位符的修复。
+
+图片按可用宽度和终端字符比例缩放，单图最高 24 行、最宽 100 列。无法取得字符尺寸时按宽高比 1:2 估算。滚动和分屏裁剪跟随文本视口，切换到编辑或帮助页会隐藏图像。编辑文档或调整窗口时重新读取本地图片，网络图片复用缓存。每次预览最多加载 32 个不同图片地址，单图不超过 10 MiB、800 万像素，缺失、损坏或超限时在图片位置显示提示。
+
+示例：`./bin/mdcli examples/images.md`。Kitty 实现依据其[图形协议](https://sw.kovidgoyal.net/kitty/graphics-protocol/#unicode-placeholders)，没有新增浏览器、Node.js 或外部图片工具依赖。
+
 ## 公式支持范围
 
 使用 [doug/termtex](https://github.com/doug/termtex) 渲染数学表达式，常用分数、上下标、希腊字母、求和、积分、矩阵等采用字符网格排版。公式始终以原始 LaTeX 保存到 Markdown 文件。
 
-这不是完整 TeX 引擎：不执行宏包、自定义宏或任意 LaTeX 文档，不保证与 KaTeX / MathJax 的排版一致。未完成、解析失败的公式不会阻止编辑。复杂公式的准确显示取决于 termtex 支持范围和终端字体；本版不使用 Kitty / Sixel 图片协议。
+这不是完整 TeX 引擎：不执行宏包、自定义宏或任意 LaTeX 文档，不保证与 KaTeX / MathJax 的排版一致。未完成、解析失败的公式不会阻止编辑。复杂公式的准确显示取决于 termtex 支持范围和终端字体；公式仍使用文本排版，不转换为图片。
 
 示例：
 
@@ -153,7 +190,7 @@ $$
 - 单文件编辑，UTF-8 文本最大 2 MiB。混用 LF / CRLF、无效 UTF-8 或不支持的控制字符会在打开时报错，不会默默转换。
 - 撤销历史最多 100 次变更、约 8 MiB 文本快照；多行粘贴算一次变更。
 - 关联滚动按内容块锚点和块内插值定位；F7 关闭后两侧独立滚动。
-- 终端预览不执行 HTML、JavaScript，不加载远程图片；图片无法像浏览器一样显示。
+- 图片显示精度取决于终端能力和 `--images` 模式，网络图片只在图片渲染开启时下载。
 - 外部修改检测不是跨进程文件锁。检测到冲突时保存失败并保留内存中的编辑内容。
 - 支持普通中文字符；组合字符和复杂 Emoji 的光标移动仍按 Unicode 码点处理。
 - 终端至少 30 列 × 10 行，推荐 100 列 × 30 行；字体应支持中文和数学 Unicode 字符。
@@ -175,6 +212,10 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/mdcli-windows-amd64.exe
 2026-11-12 本地验证：`go test ./...`、`go test -race ./...`、`go vet ./...` 通过；上述三平台构建通过。macOS arm64 的真实 tmux 终端会话已验证布局切换、预览翻页、中文输入、多行粘贴、撤销/重做、保存、窄屏焦点切换和未保存退出提示。Linux、Windows 尚未进行原生交互实测；仓库中的 GitHub Actions 配置尚未运行。
 
 Vim 与关联滚动更新已通过同样的测试、竞态检查、静态检查和三平台构建；macOS 真实终端另外验证了 `--vim`、F4、Normal / Insert、Ctrl+C、yy/p/u、`:q` / `:wq`、双向滚动、切焦点保持视口以及 F7 开关联动。
+
+本地图片更新已通过自动测试、竞态检查、静态检查和 macOS arm64 / Linux amd64 / Windows amd64 构建。macOS 的真实 tmux 会话验证了默认图片预览、双列布局、编辑与帮助页隐藏图像、窄屏缩放、图片滚出与滚回、正常退出。Kitty 模式验证了协议编码及 Bubble Tea 实际输出中的传输顺序、定位字符和颜色 ID 保留；当前环境没有 Kitty 终端，尚未实测其原图显示效果。
+
+2026-11-13 网络图片更新通过了 HTTP/HTTPS 下载、自动刷新、缓存复用、重定向、失败提示、超时与退出取消测试，以及竞态检查、静态检查和三平台构建。macOS 的真实 tmux 会话已验证从 HTTPS 地址下载 Go 标志后自动显示彩色图像、窄屏缩放和布局切换。
 
 ## 参考项目
 

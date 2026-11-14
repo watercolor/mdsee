@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"math/rand/v2"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -9,6 +11,8 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -29,7 +33,12 @@ type renderedMsg struct {
 	err      error
 	mapping  []scrollAnchor
 	source   string
+	graphics string
+	imageIDs []int
 }
+
+type imagesReadyMsg struct{ renderedMsg }
+type remoteImagesChangedMsg struct{}
 
 type model struct {
 	doc                                                  *document
@@ -47,18 +56,75 @@ type model struct {
 	mapping                                              []scrollAnchor
 	mapSource                                            string
 	pendingLineJump                                      int
+	imageMode, imageRequested                            string
+	imageIDBase                                          int
+	imageIDs                                             []int
+	cellRatio                                            float64
+	kittySupported, imageTrueColor                       bool
+	remoteImages                                         *remoteImageCache
 }
 
 func newModel(d *document, mode viewMode, theme string, vim ...bool) *model {
 	m := &model{doc: d, editor: newEditor(d.text), mode: mode, theme: theme, preview: viewport.New(), helpViewport: viewport.New()}
 	m.previewFocus = mode == previewMode
 	m.linked = true
+	m.imageIDBase = int(rand.Uint32N(0xffff00)) + 1
+	m.cellRatio = 0.5
+	m.remoteImages = newRemoteImageCache()
+	m.configureImages("auto")
 	m.vim.enabled = len(vim) == 0 || vim[0]
 	m.resize(100, 30)
 	return m
 }
 
-func (m *model) Init() tea.Cmd { return m.scheduleRender() }
+func (m *model) Init() tea.Cmd {
+	if m.imageMode != "off" && os.Getenv("TMUX") == "" {
+		query := "\x1b[16t"
+		if m.imageRequested == "auto" {
+			query += fmt.Sprintf("\x1b_Ga=q,i=%d,e=T,U=1\x1b\\", imageProbeID)
+			query += ansi.RequestNameVersion
+		}
+		return tea.Batch(m.scheduleRender(), tea.Raw(query), m.waitForRemoteImages())
+	}
+	return tea.Batch(m.scheduleRender(), m.waitForRemoteImages())
+}
+
+func (m *model) waitForRemoteImages() tea.Cmd {
+	cache := m.remoteImages
+	return func() tea.Msg {
+		select {
+		case <-cache.updates:
+			return remoteImagesChangedMsg{}
+		case <-cache.ctx.Done():
+			return nil
+		}
+	}
+}
+
+func (m *model) configureImages(mode string) {
+	m.imageRequested, m.imageMode = mode, mode
+	if mode == "auto" {
+		m.imageMode = "blocks"
+	}
+	if mode == "kitty" && os.Getenv("TMUX") != "" {
+		m.imageMode = "blocks"
+	}
+	if os.Getenv("NO_COLOR") != "" || m.theme == "ascii" {
+		m.imageMode = "off"
+	}
+}
+
+func (m *model) acceptKittySupport() tea.Cmd {
+	if m.imageRequested != "auto" || m.imageMode == "off" || os.Getenv("TMUX") != "" {
+		return nil
+	}
+	m.kittySupported = true
+	if m.imageTrueColor && m.imageMode != "kitty" {
+		m.imageMode = "kitty"
+		return m.scheduleRender()
+	}
+	return nil
+}
 
 func (m *model) actualMode() viewMode {
 	if m.mode == splitMode && m.width < 70 {
@@ -92,10 +158,34 @@ func (m *model) scheduleRender() tea.Cmd {
 func (m *model) startRender() tea.Cmd {
 	m.busy = true
 	revision, source, width, theme := m.revision, m.editor.text(), m.previewWidth, m.theme
+	images := newImageRenderer(m.imageMode, m.doc.path, theme, width, m.imageIDBase, m.cellRatio)
+	images.remote = m.remoteImages
 	return func() tea.Msg {
-		content, mapping, err := renderMappedMarkdown(source, width, theme)
-		return renderedMsg{revision: revision, content: content, err: err, mapping: mapping, source: source}
+		content, mapping, err := renderMappedMarkdown(source, width, theme, images)
+		return renderedMsg{revision: revision, content: content, err: err, mapping: mapping, source: source,
+			graphics: images.graphics.String(), imageIDs: images.ids}
 	}
+}
+
+func (m *model) acceptRender(msg renderedMsg) (tea.Model, tea.Cmd) {
+	m.busy = false
+	if msg.revision != m.revision {
+		return m, m.startRender()
+	}
+	if msg.err != nil {
+		m.status = "预览失败：" + msg.err.Error()
+	} else {
+		m.preview.SetContent(msg.content)
+		m.mapping, m.mapSource = msg.mapping, msg.source
+		if m.pendingLineJump > 0 {
+			m.jumpToSourceLine(m.pendingLineJump - 1)
+		} else if m.previewFocus {
+			m.syncFromPreview()
+		} else {
+			m.syncFromEditor()
+		}
+	}
+	return m, nil
 }
 
 func (m *model) dirty() bool { return m.editor.text() != m.doc.text }
@@ -111,6 +201,41 @@ func (m *model) save() bool {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case remoteImagesChangedMsg:
+		return m, tea.Batch(m.scheduleRender(), m.waitForRemoteImages())
+	case uv.KittyGraphicsEvent:
+		if msg.Options.ID == imageProbeID &&
+			msg.Options.VirtualPlacement && string(msg.Payload) == "OK" {
+			return m, m.acceptKittySupport()
+		}
+		return m, nil
+	case tea.TerminalVersionMsg:
+		if itermSupportsImagePlaceholders(msg.Name) {
+			return m, m.acceptKittySupport()
+		}
+		return m, nil
+	case uv.CellSizeEvent:
+		if msg.Width > 0 && msg.Height > 0 {
+			m.cellRatio = float64(msg.Width) / float64(msg.Height)
+			return m, m.scheduleRender()
+		}
+		return m, nil
+	case tea.ColorProfileMsg:
+		// Placeholder foreground colors encode image IDs and must survive unchanged.
+		before := m.imageMode
+		m.imageTrueColor = msg.Profile == colorprofile.TrueColor
+		m.configureImages(m.imageRequested)
+		if msg.Profile == colorprofile.NoTTY || msg.Profile == colorprofile.ASCII {
+			m.imageMode = "off"
+		} else if !m.imageTrueColor && m.imageMode == "kitty" {
+			m.imageMode = "blocks"
+		} else if m.imageTrueColor && m.imageMode == "blocks" && m.imageRequested == "auto" && m.kittySupported && os.Getenv("TMUX") == "" {
+			m.imageMode = "kitty"
+		}
+		if before != m.imageMode {
+			return m, m.scheduleRender()
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.resize(msg.Width, msg.Height)
 		return m, m.scheduleRender()
@@ -120,24 +245,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case renderedMsg:
-		m.busy = false
 		if msg.revision != m.revision {
 			return m, m.startRender()
 		}
-		if msg.err != nil {
-			m.status = "预览失败：" + msg.err.Error()
-		} else {
-			m.preview.SetContent(msg.content)
-			m.mapping, m.mapSource = msg.mapping, msg.source
-			if m.pendingLineJump > 0 {
-				m.jumpToSourceLine(m.pendingLineJump - 1)
-			} else if m.previewFocus {
-				m.syncFromPreview()
-			} else {
-				m.syncFromEditor()
-			}
+		if msg.err == nil && (msg.graphics != "" || len(m.imageIDs) > 0) {
+			payload := deleteImageResources(m.imageIDs) + msg.graphics
+			m.imageIDs = msg.imageIDs
+			return m, tea.Sequence(tea.Raw(payload), func() tea.Msg { return imagesReadyMsg{msg} })
 		}
-		return m, nil
+		return m.acceptRender(msg)
+	case imagesReadyMsg:
+		return m.acceptRender(msg.renderedMsg)
 	case tea.KeyPressMsg:
 		key := msg.String()
 		if m.confirmQuit {
