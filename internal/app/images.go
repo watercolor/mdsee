@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -69,6 +70,8 @@ type imageRenderer struct {
 	cellRatio            float64
 	cache                map[string]imagePreview
 	remote               *remoteImageCache
+	diagrams             *mermaidImageCache
+	diagramKeys          map[string]struct{}
 	graphics             strings.Builder
 	ids                  []int
 }
@@ -84,7 +87,7 @@ func newImageRenderer(mode, path, theme string, width, idBase int, ratio float64
 		ratio = 0.5
 	}
 	return &imageRenderer{mode: mode, baseDir: filepath.Dir(path), theme: theme, width: width,
-		idBase: idBase, cellRatio: ratio, cache: make(map[string]imagePreview)}
+		idBase: idBase, cellRatio: ratio, cache: make(map[string]imagePreview), diagramKeys: make(map[string]struct{})}
 }
 
 func localImagePath(baseDir, destination string) (string, error) {
@@ -124,6 +127,9 @@ func localImagePath(baseDir, destination string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
+var errImageBytesLimit = errors.New("图片超过 10 MiB")
+var errImagePixelsLimit = errors.New("图片超过 800 万像素")
+
 func readLocalImage(path string) (image.Image, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -133,7 +139,7 @@ func readLocalImage(path string) (image.Image, error) {
 		return nil, fmt.Errorf("图片必须是普通文件")
 	}
 	if info.Size() > maxImageBytes {
-		return nil, fmt.Errorf("图片超过 10 MiB")
+		return nil, errImageBytesLimit
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -153,7 +159,7 @@ func decodeImage(raw []byte) (image.Image, error) {
 		return nil, fmt.Errorf("不支持或损坏的图片（支持 PNG、JPEG、GIF）")
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxImagePixels {
-		return nil, fmt.Errorf("图片超过 800 万像素")
+		return nil, errImagePixelsLimit
 	}
 	img, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
@@ -162,17 +168,22 @@ func decodeImage(raw []byte) (image.Image, error) {
 	return img, nil
 }
 
-func imageDimensions(bounds image.Rectangle, width int, ratio float64) (int, int) {
+func imageDimensions(bounds image.Rectangle, width int, ratio float64, maxRows int) (int, int) {
 	cols := max(1, min(100, width, bounds.Dx()))
 	rows := max(1, int(math.Ceil(float64(cols)*float64(bounds.Dy())/float64(bounds.Dx())*ratio)))
-	if rows > 24 {
-		rows = 24
+	if rows > maxRows {
+		rows = maxRows
 		cols = max(1, int(math.Round(float64(rows)*float64(bounds.Dx())/float64(bounds.Dy())/ratio)))
 	}
 	return cols, rows
 }
 
 func (r *imageRenderer) preview(destination string) imagePreview {
+	return r.renderPreview(destination, 0)
+}
+
+// diagramScale is the PNG's render density. Zero denotes an ordinary image.
+func (r *imageRenderer) renderPreview(destination string, diagramScale int) imagePreview {
 	path, network, err := remoteImageURL(destination)
 	if err == nil && !network {
 		path, err = localImagePath(r.baseDir, destination)
@@ -207,14 +218,28 @@ func (r *imageRenderer) preview(destination string) imagePreview {
 	if err != nil {
 		p.err = err
 	} else {
-		cols, rows := imageDimensions(img.Bounds(), max(1, r.width-8), r.cellRatio)
+		maxRows := 24
+		if diagramScale > 0 && r.mode == "kitty" {
+			maxRows = 256
+		}
+		width := max(1, r.width-8)
+		if diagramScale > 0 {
+			// Mermaid's default 16px labels map approximately to two columns for CJK.
+			// Remove PNG density before layout so higher resolution never enlarges the diagram.
+			naturalColumns := max(1, int(math.Ceil(float64(img.Bounds().Dx())/float64(diagramScale)/8)))
+			width = min(width, naturalColumns)
+		}
+		cols, rows := imageDimensions(img.Bounds(), width, r.cellRatio, maxRows)
 		if r.mode == "kitty" {
 			id := r.idBase + len(r.ids)
-			// Bound transmission size independently of the original file dimensions.
-			scale := min(1.0, float64(cols*12)/float64(img.Bounds().Dx()), float64(rows*24)/float64(img.Bounds().Dy()))
-			scaled := sampleImage(img, max(1, int(float64(img.Bounds().Dx())*scale)), max(1, int(float64(img.Bounds().Dy())*scale)), color.NRGBA{})
+			// Keep diagram text and thin lines at source resolution for Retina displays.
+			transmitted := img
+			if diagramScale == 0 {
+				scale := min(1.0, float64(cols*12)/float64(img.Bounds().Dx()), float64(rows*24)/float64(img.Bounds().Dy()))
+				transmitted = sampleImage(img, max(1, int(float64(img.Bounds().Dx())*scale)), max(1, int(float64(img.Bounds().Dy())*scale)), color.NRGBA{})
+			}
 			var payload bytes.Buffer
-			err = kitty.EncodeGraphics(&payload, scaled, &kitty.Options{Action: kitty.TransmitAndPut,
+			err = kitty.EncodeGraphics(&payload, transmitted, &kitty.Options{Action: kitty.TransmitAndPut,
 				ID: id, Transmission: kitty.Direct, Format: kitty.PNG, Quite: 2, Chunk: true, VirtualPlacement: true, Columns: cols, Rows: rows})
 			if err != nil {
 				p.err = fmt.Errorf("图片编码失败")
@@ -309,6 +334,7 @@ func newImageMarkdownRenderer(width int, style glamansi.StyleConfig, images *ima
 func (r *imageMarkdownRenderer) Render(source string) (string, error) {
 	raw := []byte(source)
 	root := r.md.Parser().Parse(text.NewReader(raw))
+	raw = r.renderDiagramNodes(raw, root)
 	prefix := "MI"
 	for strings.Contains(source, prefix) {
 		prefix += "I"

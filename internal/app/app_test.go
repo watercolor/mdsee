@@ -18,7 +18,7 @@ func testModel(t *testing.T) *model {
 		t.Fatal(err)
 	}
 	m := newModel(d, splitMode, "dark", false)
-	t.Cleanup(m.remoteImages.cancel)
+	t.Cleanup(m.close)
 	return m
 }
 

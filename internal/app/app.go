@@ -28,19 +28,21 @@ func (v viewMode) String() string { return [...]string{"双列", "编辑", "预�
 
 type refreshMsg int
 type renderedMsg struct {
-	revision int
-	content  string
-	err      error
-	mapping  []scrollAnchor
-	source   string
-	graphics string
-	imageIDs []int
+	diagramKeys []string
+	revision    int
+	content     string
+	err         error
+	mapping     []scrollAnchor
+	source      string
+	graphics    string
+	imageIDs    []int
 }
 
 type imagesReadyMsg struct{ renderedMsg }
-type remoteImagesChangedMsg struct{}
+type previewAssetsChangedMsg struct{}
 
 type model struct {
+	diagramKeys                                          []string
 	pendingNavigation                                    *matchPosition
 	restorePreviewOffset                                 *int
 	nav                                                  navigation
@@ -68,6 +70,7 @@ type model struct {
 	cellRatio                                            float64
 	kittySupported, imageTrueColor                       bool
 	remoteImages                                         *remoteImageCache
+	diagrams                                             *mermaidImageCache
 }
 
 func newModel(d *document, mode viewMode, theme string, vim ...bool) *model {
@@ -77,6 +80,7 @@ func newModel(d *document, mode viewMode, theme string, vim ...bool) *model {
 	m.imageIDBase = int(rand.Uint32N(0xffff00)) + 1
 	m.cellRatio = 0.5
 	m.remoteImages = newRemoteImageCache()
+	m.diagrams = newMermaidImageCache(m.remoteImages.updates)
 	m.configureImages("auto")
 	m.vim.enabled = len(vim) == 0 || vim[0]
 	m.resize(100, 30)
@@ -90,17 +94,17 @@ func (m *model) Init() tea.Cmd {
 			query += fmt.Sprintf("\x1b_Ga=q,i=%d,e=T,U=1\x1b\\", imageProbeID)
 			query += ansi.RequestNameVersion
 		}
-		return tea.Batch(m.scheduleRender(), tea.Raw(query), m.waitForRemoteImages())
+		return tea.Batch(m.scheduleRender(), tea.Raw(query), m.waitForPreviewAssets())
 	}
-	return tea.Batch(m.scheduleRender(), m.waitForRemoteImages())
+	return tea.Batch(m.scheduleRender(), m.waitForPreviewAssets())
 }
 
-func (m *model) waitForRemoteImages() tea.Cmd {
+func (m *model) waitForPreviewAssets() tea.Cmd {
 	cache := m.remoteImages
 	return func() tea.Msg {
 		select {
 		case <-cache.updates:
-			return remoteImagesChangedMsg{}
+			return previewAssetsChangedMsg{}
 		case <-cache.ctx.Done():
 			return nil
 		}
@@ -166,10 +170,15 @@ func (m *model) startRender() tea.Cmd {
 	revision, source, width, theme := m.revision, m.editor.text(), m.previewWidth, m.theme
 	images := newImageRenderer(m.imageMode, m.doc.path, theme, width, m.imageIDBase, m.cellRatio)
 	images.remote = m.remoteImages
+	images.diagrams = m.diagrams
 	return func() tea.Msg {
 		content, mapping, err := renderMappedMarkdown(source, width, theme, images)
+		var keys []string
+		for key := range images.diagramKeys {
+			keys = append(keys, key)
+		}
 		return renderedMsg{revision: revision, content: content, err: err, mapping: mapping, source: source,
-			graphics: images.graphics.String(), imageIDs: images.ids}
+			graphics: images.graphics.String(), imageIDs: images.ids, diagramKeys: keys}
 	}
 }
 
@@ -183,6 +192,7 @@ func (m *model) acceptRender(msg renderedMsg) (tea.Model, tea.Cmd) {
 	} else {
 		m.preview.SetContent(msg.content)
 		m.mapping, m.mapSource = msg.mapping, msg.source
+		m.diagramKeys = msg.diagramKeys
 		if m.restorePreviewOffset != nil {
 			m.preview.SetYOffset(*m.restorePreviewOffset)
 			m.restorePreviewOffset = nil
@@ -223,8 +233,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case remoteImagesChangedMsg:
-		return m, tea.Batch(m.scheduleRender(), m.waitForRemoteImages())
+	case previewAssetsChangedMsg:
+		return m, tea.Batch(m.scheduleRender(), m.waitForPreviewAssets())
 	case uv.KittyGraphicsEvent:
 		if msg.Options.ID == imageProbeID &&
 			msg.Options.VirtualPlacement && string(msg.Payload) == "OK" {
@@ -564,6 +574,18 @@ func (m *model) View() tea.View {
 }
 
 func (m *model) statusLine(right string) string {
+	progress := m.diagrams.progress(m.diagramKeys)
+	if progress.total > 0 && (progress.pending() || m.status == "") {
+		message := progress.message()
+		if m.width < 70 {
+			message = progress.compact()
+		}
+		reserve := min(ansi.StringWidth(message)+2, max(0, m.width-10))
+		right = ansi.Truncate(right, max(0, m.width-reserve-1), "…")
+		available := max(0, m.width-ansi.StringWidth(right)-1)
+		left := ansi.Truncate(" "+message, available, "…")
+		return left + strings.Repeat(" ", max(0, m.width-ansi.StringWidth(left)-ansi.StringWidth(right)-1)) + right + " "
+	}
 	right = ansi.Truncate(right, max(0, m.width-1), "…")
 	available := max(0, m.width-ansi.StringWidth(right)-1)
 	left := ""
@@ -585,3 +607,5 @@ func (m *model) statusLine(right string) string {
 	gap := max(0, m.width-ansi.StringWidth(left)-ansi.StringWidth(right)-1)
 	return left + strings.Repeat(" ", gap) + right + " "
 }
+
+func (m *model) close() { m.remoteImages.cancel(); m.diagrams.close() }

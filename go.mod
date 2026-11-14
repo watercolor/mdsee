@@ -12,6 +12,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/doug/termtex v0.0.0-20260918165034-c407d5cf5251
+	github.com/spacedock-dev/mermaidtext v0.1.1
 	github.com/yuin/goldmark v1.8.2
 )
 

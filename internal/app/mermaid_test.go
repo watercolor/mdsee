@@ -20,12 +20,12 @@ func TestMermaidDiagramsAndFallback(t *testing.T) {
 			}
 		}
 	}
-	source := "```mermaid\nsequenceDiagram\nA->>B: hello\n```"
+	source := "```mermaid\npie\n\"A\" : 1\n```"
 	output, err := renderMarkdown(source, 80, "dark")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output, "Mermaid 未渲染") || !strings.Contains(ansi.Strip(output), "sequenceDiagram") {
+	if !strings.Contains(output, "Mermaid 字符回退") || !strings.Contains(ansi.Strip(output), "pie") {
 		t.Fatal(output)
 	}
 	code := "````md\n```mermaid\ngraph TD\nA --> B\n```\n````"

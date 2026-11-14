@@ -74,7 +74,7 @@ func Run(args []string, out io.Writer) error {
 		return fmt.Errorf("交互编辑需要终端；输出预览请使用 --print 文件.md")
 	}
 	m := newModel(d, mode, *theme, *vim)
-	defer m.remoteImages.cancel()
+	defer m.close()
 	m.configureImages(*images)
 	m.storeBuffer()
 	for _, path := range fs.Args()[min(1, fs.NArg()):] {

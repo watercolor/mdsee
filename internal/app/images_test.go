@@ -522,3 +522,72 @@ func decodeKittyUpload(t *testing.T, output string) image.Image {
 	}
 	return img
 }
+
+func TestKittyDiagramPreservesPixelsAndScrollableHeight(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "diagram.png")
+	img := image.NewNRGBA(image.Rect(0, 0, 600, 1200))
+	for y := 0; y < 1200; y++ {
+		img.SetNRGBA(y%600, y, color.NRGBA{R: 255, G: 125, A: 255})
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(file, img); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	r := newImageRenderer("kitty", path, "dark", 80, 0x123456, .5)
+	preview := r.renderPreview(path, 1)
+	if preview.err != nil || len(preview.rows) <= 24 || len(preview.rows) > 256 {
+		t.Fatalf("diagram must scroll beyond thumbnail height: %d %v", len(preview.rows), preview.err)
+	}
+	decoded := decodeKittyUpload(t, r.graphics.String())
+	if decoded.Bounds() != img.Bounds() {
+		t.Fatalf("diagram downsampled: %v", decoded.Bounds())
+	}
+	if got := color.NRGBAModel.Convert(decoded.At(599, 1199)); got != img.NRGBAAt(599, 1199) {
+		t.Fatal("lost one-pixel diagram line")
+	}
+	ordinary := newImageRenderer("kitty", path, "dark", 80, 0x123456, .5)
+	if rows := ordinary.preview(path).rows; len(rows) > 24 {
+		t.Fatal("ordinary image layout changed")
+	}
+}
+
+func TestMermaidDisplaySizeIndependentOfResolution(t *testing.T) {
+	for _, density := range []int{1, 2, 3} {
+		t.Run(fmt.Sprint(density), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "diagram.png")
+			img := image.NewNRGBA(image.Rect(0, 0, 320*density, 480*density))
+			img.SetNRGBA(10, 10, color.NRGBA{R: 255, A: 255})
+			file, err := os.Create(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := png.Encode(file, img); err != nil {
+				t.Fatal(err)
+			}
+			file.Close()
+			for _, width := range []int{80, 160} {
+				r := newImageRenderer("kitty", path, "dark", width, 0x123456, .5)
+				preview := r.renderPreview(path, density)
+				if preview.err != nil {
+					t.Fatal(preview.err)
+				}
+				if len(preview.rows) != 30 || ansi.StringWidth(preview.rows[0]) != 40 {
+					t.Fatalf("density=%d width=%d produced %dx%d, want 40x30", density, width, ansi.StringWidth(preview.rows[0]), len(preview.rows))
+				}
+				decoded := decodeKittyUpload(t, r.graphics.String())
+				if decoded.Bounds() != img.Bounds() {
+					t.Fatal("display sizing reduced PNG resolution")
+				}
+			}
+			narrow := newImageRenderer("kitty", path, "dark", 30, 0x123456, .5)
+			preview := narrow.renderPreview(path, density)
+			if ansi.StringWidth(preview.rows[0]) > 22 || len(preview.rows) != 17 {
+				t.Fatal("wide diagram must fit a narrow pane proportionally")
+			}
+		})
+	}
+}

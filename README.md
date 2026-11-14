@@ -162,18 +162,31 @@ mdcli --help
 
 文件选择面板使用 Esc 返回。Vim 中的 `Ctrl+F` / `Ctrl+B` 分别向下和向上翻整页。
 
-## Mermaid 字符图
+## Mermaid 渲染
 
-预览及 `--print` 支持 `mermaid` 围栏中的基础 `flowchart` 和 `graph`。方向包括 TD、TB、BT、LR、RL，节点支持 `A`、`A[文字]`、`A(文字)`、`A{文字}`，连线支持 `-->`、`---`、`-.->`、`==>` 和 `-->|标签|`，也支持链式连接、分支、循环及独立节点。
+启动时检测 `PATH` 中的 `mmdc`。在图片预览开启时优先使用本机 Mermaid CLI，把代码块异步渲染为 PNG，保存到系统临时目录，再通过现有 Kitty 或彩色字符图片管线显示。
 
-```mermaid
-flowchart LR
-A[开始] --> B{检查}
-B -->|通过| C[完成]
-B -.-> A
+- 生成期间先显示 `mermaidtext` 字符版本。底部状态栏显示当前文档的完成进度、运行数和排队数，窄屏显示精简进度。PNG 完成后自动刷新，失败时显示字符回退及缺少浏览器等原因。
+- 未安装 `mmdc`、生成失败、20 秒超时或 PNG 无法读取时，使用 `mermaidtext` 字符回退。
+- PNG 优先按 3 倍分辨率生成，超过单图大小或像素限制时依次尝试 2 倍、1 倍。Kitty 模式保留 Mermaid 原始像素，显示尺寸按生成倍率还原到原始排版大小，小图自然显示，宽图按面板宽度缩小，高图最多 256 行，可用空格或方向键滚动浏览。
+- 同一源码和主题共用会话缓存，调整终端大小时复用 PNG，按当前面板尺寸缩放。最多缓存 32 个图，使用最久未访问的已完成图为新图腾出空间，最多同时执行两个 `mmdc`。失败结果保留 30 秒，之后重绘时可重试。
+- 临时目录由 mdcli 单独创建，退出时取消生成任务并清理。macOS、Linux 和 Windows 会尝试结束渲染进程树。
+- `--images off`、ASCII 主题、无颜色终端及 `--print` 使用字符渲染。
+
+字符引擎使用 `mermaidtext v0.1.1`，覆盖流程图、时序图、状态图、类图和 ER 图的部分语法。思维导图和甘特图需要 `mmdc` 图片路径，字符引擎会为这两类图保留带框的源码。布局超宽或语法不支持时也会保留源码。每个图的源码最多 64 KiB，生成图片沿用单图 10 MiB、800 万像素等限制。
+
+安装和检查 Mermaid CLI 后重新启动 mdcli，即可使用图片路径。
+
+```sh
+npm install -g @mermaid-js/mermaid-cli
+mmdc --version
+./bin/mdcli examples/mermaid.md
 ```
 
-字符图逐条连线展示节点关系，分支和循环中的节点会重复显示，节点形状统一为方框。横向连线在宽度不足时改为纵向排列。子图、样式、复杂节点和其他图类型会显示未渲染提示并保留源码。
+`mmdc` 还需要可用的浏览器运行环境，安装与故障处理见 [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli)。字符引擎的语法范围、宽度回退和 Apache-2.0 许可证见 [mermaidtext](https://github.com/spacedock-dev/mermaidtext)。
+
+如果提示缺少 `chrome-headless-shell`，需要通过当前 mmdc 所使用的 Puppeteer 安装匹配版本的浏览器。安装完成后重新打开 mdcli，可清除本次会话的失败缓存。显示大小按原始排版尺寸计算，默认以图中文字接近终端正文大小为目标，调整窗口时会重新计算布局。
+
 
 ## 图片预览
 
@@ -206,7 +219,7 @@ tmux 内使用 `blocks`，包括显式指定 `kitty` 时；本版未接入 tmux 
 
 iTerm2 的自动识别使用终端实际返回的名称和版本，不依赖 `TERM_PROGRAM` 环境变量。iTerm2 3.7.3 及以上正式版可直接运行 `./bin/mdcli examples/images.md`；未识别的版本仍可用 `--images kitty` 手动尝试。版本下限依据 [iTerm2 更新记录](https://iterm2.com/downloads.html)中对图片 ID 高位占位符的修复。
 
-图片按可用宽度和终端字符比例缩放，单图最高 24 行、最宽 100 列。无法取得字符尺寸时按宽高比 1:2 估算。滚动和分屏裁剪跟随文本视口，切换到编辑或帮助页会隐藏图像。编辑文档或调整窗口时重新读取本地图片，网络图片复用缓存。每次预览最多加载 32 个不同图片地址，单图不超过 10 MiB、800 万像素，缺失、损坏或超限时在图片位置显示提示。
+图片按可用宽度和终端字符比例缩放，普通图片最高 24 行、最宽 100 列，Kitty 模式的 Mermaid 图片最高 256 行。无法取得字符尺寸时按宽高比 1:2 估算。滚动和分屏裁剪跟随文本视口，切换到编辑或帮助页会隐藏图像。编辑文档或调整窗口时重新读取本地图片，网络图片复用缓存。每次预览最多加载 32 个不同图片地址，单图不超过 10 MiB、800 万像素，缺失、损坏或超限时在图片位置显示提示。
 
 示例：`./bin/mdcli examples/images.md`。Kitty 实现依据其[图形协议](https://sw.kovidgoyal.net/kitty/graphics-protocol/#unicode-placeholders)，没有新增浏览器、Node.js 或外部图片工具依赖。
 
@@ -254,9 +267,13 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/mdcli-windows-amd64.exe
 
 Vim 与关联滚动更新已通过同样的测试、竞态检查、静态检查和三平台构建；macOS 真实终端另外验证了 `--vim`、F4、Normal / Insert、Ctrl+C、yy/p/u、`:q` / `:wq`、双向滚动、切焦点保持视口以及 F7 开关联动。
 
-本地图片更新已通过自动测试、竞态检查、静态检查和 macOS arm64 / Linux amd64 / Windows amd64 构建。macOS 的真实 tmux 会话验证了默认图片预览、双列布局、编辑与帮助页隐藏图像、窄屏缩放、图片滚出与滚回、正常退出。Kitty 模式验证了协议编码及 Bubble Tea 实际输出中的传输顺序、定位字符和颜色 ID 保留；当前环境没有 Kitty 终端，尚未实测其原图显示效果。
+本地图片更新已通过自动测试、竞态检查、静态检查和 macOS arm64 / Linux amd64 / Windows amd64 构建。macOS 的真实 tmux 会话验证了默认图片预览、双列布局、编辑与帮助页隐藏图像、窄屏缩放、图片滚出与滚回、正常退出。Kitty 模式验证了协议编码及 Bubble Tea 实际输出中的传输顺序、定位字符和颜色 ID 保留；用户已在 iTerm2 确认原图显示正常，Kitty 和 Ghostty 尚待单独实测。
 
 2026-11-13 网络图片更新通过了 HTTP/HTTPS 下载、自动刷新、缓存复用、重定向、失败提示、超时与退出取消测试，以及竞态检查、静态检查和三平台构建。macOS 的真实 tmux 会话已验证从 HTTPS 地址下载 Go 标志后自动显示彩色图像、窄屏缩放和布局切换。
+
+2026-11-14 Mermaid 更新已通过自动测试、竞态检查、`go vet` 和构建。测试覆盖 mmdc 检测、后台完成后刷新、超时取消、缺少浏览器与损坏 PNG 回退、缓存和临时目录清理，以及 1 / 2 / 3 倍出图的显示尺寸一致性和上传像素保留。Windows、Linux 构建通过，原生交互仍待验证。
+
+本机使用 mmdc 12.2.0 与 chrome-headless-shell 156.0.8078.47，六类示例均已实际生成 PNG，终端状态栏显示完成 6/6。原图及缩放后显示效果已由用户在 iTerm2 确认。示例时序图由 650×586 提升到 1950×1758，终端显示尺寸按原始排版大小计算。
 
 ## 参考项目
 
@@ -268,6 +285,8 @@ Vim 与关联滚动更新已通过同样的测试、竞态检查、静态检查�
 | [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) | 直接使用终端事件循环和跨平台输入支持 |
 | [charmbracelet/bubbles](https://github.com/charmbracelet/bubbles) | 直接使用预览滚动组件 |
 | [charmbracelet/glamour](https://github.com/charmbracelet/glamour) | 直接使用 Markdown ANSI 渲染和代码高亮 |
+| [spacedock-dev/mermaidtext](https://github.com/spacedock-dev/mermaidtext) | 直接使用 Mermaid 字符渲染库，版本固定为 v0.1.1 |
+| [mermaid-js/mermaid-cli](https://github.com/mermaid-js/mermaid-cli) | 检测本机 mmdc，后台生成 Mermaid PNG |
 | [doug/termtex](https://github.com/doug/termtex) | 直接使用 LaTeX 到 Unicode 的数学排版 |
 | [junosuarez/termtex](https://github.com/junosuarez/termtex) | 后续图片公式方向的参考；依赖 Kitty Graphics Protocol 才能显示图形效果 |
 

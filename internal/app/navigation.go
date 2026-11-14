@@ -385,6 +385,7 @@ func (m *model) switchBuffer(index int) tea.Cmd {
 	b := m.buffers[index]
 	m.doc, m.editor, m.vim, m.searchQuery = b.doc, b.editor, b.vim, b.query
 	m.mapping = nil
+	m.diagramKeys = nil
 	m.mapSource = ""
 	m.pendingLineJump = 0
 	m.pendingNavigation = nil
