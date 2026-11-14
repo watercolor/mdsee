@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"fmt"
@@ -41,6 +41,12 @@ type imagesReadyMsg struct{ renderedMsg }
 type remoteImagesChangedMsg struct{}
 
 type model struct {
+	pendingNavigation                                    *matchPosition
+	restorePreviewOffset                                 *int
+	nav                                                  navigation
+	searchQuery                                          string
+	buffers                                              []documentBuffer
+	activeBuffer                                         int
 	doc                                                  *document
 	editor                                               editor
 	preview                                              viewport.Model
@@ -177,7 +183,14 @@ func (m *model) acceptRender(msg renderedMsg) (tea.Model, tea.Cmd) {
 	} else {
 		m.preview.SetContent(msg.content)
 		m.mapping, m.mapSource = msg.mapping, msg.source
-		if m.pendingLineJump > 0 {
+		if m.restorePreviewOffset != nil {
+			m.preview.SetYOffset(*m.restorePreviewOffset)
+			m.restorePreviewOffset = nil
+		} else if m.pendingNavigation != nil {
+			p := *m.pendingNavigation
+			m.pendingNavigation = nil
+			m.navigateTo(p.row, p.col)
+		} else if m.pendingLineJump > 0 {
 			m.jumpToSourceLine(m.pendingLineJump - 1)
 		} else if m.previewFocus {
 			m.syncFromPreview()
@@ -201,6 +214,15 @@ func (m *model) save() bool {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case filesFoundMsg:
+		if m.nav.kind == "文件" {
+			m.nav.items = msg.items
+			m.nav.loading = false
+			if msg.err != nil {
+				m.status = "文件扫描失败：" + msg.err.Error()
+			}
+		}
+		return m, nil
 	case remoteImagesChangedMsg:
 		return m, tea.Batch(m.scheduleRender(), m.waitForRemoteImages())
 	case uv.KittyGraphicsEvent:
@@ -261,7 +283,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.confirmQuit {
 			switch key {
 			case "s", "ctrl+s":
-				if m.save() {
+				if m.saveAllBuffers() {
 					return m, tea.Quit
 				}
 			case "d":
@@ -273,11 +295,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if key == "ctrl+q" || (key == "ctrl+c" && !m.vim.enabled) {
-			if m.dirty() {
+			if m.hasDirtyBuffers() {
 				m.confirmQuit = true
 				return m, nil
 			}
 			return m, tea.Quit
+		}
+		if m.nav.kind != "" {
+			return m, m.navigationInput(msg)
 		}
 		if key == "f1" {
 			m.vim.clearNavigation()
@@ -314,6 +339,54 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.vim.commandOpen {
 			return m, m.commandInput(msg)
+		}
+		switch key {
+		case "f3":
+			return m, m.findMatch(1)
+		case "shift+f3":
+			return m, m.findMatch(-1)
+		case "f8":
+			return m, m.openNavigation("目录")
+		case "f9":
+			return m, m.openNavigation("文件")
+		case "f10":
+			return m, m.openNavigation("缓冲区")
+		case "ctrl+tab":
+			m.storeBuffer()
+			return m, m.switchBuffer((m.activeBuffer + 1) % len(m.buffers))
+		case "ctrl+shift+tab":
+			m.storeBuffer()
+			return m, m.switchBuffer((m.activeBuffer + len(m.buffers) - 1) % len(m.buffers))
+		case "alt+[":
+			return m, m.jumpHeading(-1)
+		case "alt+]":
+			return m, m.jumpHeading(1)
+		}
+		if key == "space" && m.previewFocus {
+			m.pendingLineJump = 0
+			m.vim.clearNavigation()
+			m.preview.PageDown()
+			m.syncFromPreview()
+			return m, nil
+		}
+		if m.previewFocus || (m.vim.enabled && !m.vim.insert) {
+			switch key {
+			case "tab":
+				m.storeBuffer()
+				return m, m.switchBuffer((m.activeBuffer + 1) % len(m.buffers))
+			case "shift+tab":
+				m.storeBuffer()
+				return m, m.switchBuffer((m.activeBuffer + len(m.buffers) - 1) % len(m.buffers))
+			case "/":
+				return m, m.openNavigation("搜索")
+			case "n":
+				return m, m.findMatch(1)
+			case "N":
+				return m, m.findMatch(-1)
+			}
+		}
+		if key == "o" && m.previewFocus {
+			return m, m.openNavigation("目录")
 		}
 		switch key {
 		case "f7":
@@ -371,6 +444,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if m.nav.kind != "" {
+		return m, m.navigationInput(msg)
+	}
 	// Modal screens also block pasted text and other input messages.
 	if m.confirmQuit || m.help {
 		return m, nil
@@ -417,17 +493,19 @@ func (m *model) View() tea.View {
 	}
 	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#67c8b3")).Render(clipped(" MDCLI  "+filepath.Base(m.doc.path)+mark+"  / "+m.mode.String(), m.width))
 	var body string
-	if m.help {
+	if m.nav.kind != "" && m.nav.kind != "目录" && m.nav.kind != "搜索" {
+		body = m.navigationView()
+	} else if m.help {
 		body = m.helpPanel()
 	} else {
 		switch m.actualMode() {
 		case editMode:
-			body = m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight), m.editorWidth, !m.previewFocus)
+			body = m.panel("原文", highlightMatches(m.editor.view(m.editorWidth, m.bodyHeight), m.searchQuery), m.editorWidth, !m.previewFocus)
 		case previewMode:
-			body = m.panel("预览 · ↑↓ / PgUp PgDn", m.preview.View(), m.previewWidth, true)
+			body = m.panel("预览 · ↑↓ / PgUp PgDn", highlightMatches(m.preview.View(), m.searchQuery), m.previewWidth, true)
 		default:
-			left := m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight), m.editorWidth, !m.previewFocus)
-			right := m.panel("预览", m.preview.View(), m.previewWidth, m.previewFocus)
+			left := m.panel("原文", highlightMatches(m.editor.view(m.editorWidth, m.bodyHeight), m.searchQuery), m.editorWidth, !m.previewFocus)
+			right := m.panel("预览", highlightMatches(m.preview.View(), m.searchQuery), m.previewWidth, m.previewFocus)
 			body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 		}
 	}
@@ -448,13 +526,27 @@ func (m *model) View() tea.View {
 		status = ansi.TruncateLeft(status, max(0, ansi.StringWidth(status)-m.width+1), "")
 		footer = lipgloss.NewStyle().Width(m.width).Render(status)
 	}
+	if m.nav.kind == "搜索" {
+		footer = clipped("/"+m.nav.query+fmt.Sprintf("  [%d 匹配]", len(searchMatches(m.editor.lines, m.nav.query))), m.width)
+	}
 	if m.confirmQuit {
-		footer = clipped(" 未保存：S 保存并退出 · D 放弃修改 · Esc 返回", m.width)
+		footer = clipped(" 未保存文件：S 全部保存并退出 · D 全部放弃 · Esc 返回", m.width)
 	}
 	content := strings.Join([]string{header, body, footer}, "\n")
+	if m.nav.kind == "目录" {
+		overlay := m.directoryView()
+		canvas := lipgloss.NewCanvas(m.width, m.height)
+		canvas.Compose(lipgloss.NewCompositor(lipgloss.NewLayer(content),
+			lipgloss.NewLayer(overlay).X((m.width-lipgloss.Width(overlay))/2).Y((m.height-lipgloss.Height(overlay))/2)))
+		content = canvas.Render()
+	}
 	v := tea.NewView(lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(content))
 	v.AltScreen = true
-	if !m.help && !m.confirmQuit {
+	if m.nav.kind == "搜索" {
+		v.Cursor = tea.NewCursor(min(m.width-1, ansi.StringWidth("/"+m.nav.query)), m.height-1)
+		v.Cursor.Shape = tea.CursorBar
+	}
+	if !m.help && !m.confirmQuit && m.nav.kind == "" {
 		if m.vim.commandOpen {
 			v.Cursor = tea.NewCursor(ansi.StringWidth(status), m.bodyHeight+4)
 			v.Cursor.Shape = tea.CursorBar

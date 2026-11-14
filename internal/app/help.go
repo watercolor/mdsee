@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"fmt"
@@ -46,11 +46,14 @@ func (m *model) helpSections() ([]helpSection, []helpSection) {
 		save = append(save, helpBinding{"Ctrl+C", "退出，有修改时提示"})
 	}
 	right := []helpSection{
+		{"搜索与文件", []helpBinding{
+			{"/ · n / N", "搜索 · 下一处 / 上一处"}, {"F3 / Shift+F3", "下一处 / 上一处匹配"}, {"o / F8", "预览目录 / 编辑区目录"}, {"Alt+[ / ]", "上一章 / 下一章"}, {"F9", "发现当前目录及子目录文件"}, {"F10", "缓冲区列表"}, {"Tab / Shift+Tab", "预览或 Normal 中切换文件"},
+		}},
 		{"窗口与模式", []helpBinding{
 			{"Ctrl+P / F5", "双列 → 编辑 → 预览"}, {"Ctrl+W / F6", "切换左右焦点"}, {"F4", "普通编辑 ↔ Vim 模式"}, {"F7", "开关双向关联滚动"},
 		}},
 		{"浏览与滚动", []helpBinding{
-			{"↑ ↓ / j k", "预览上下滚动"}, {"PgUp / PgDn", "当前面板翻页"}, {"Alt+↑ / ↓", "编辑时滚动预览"}, {"Alt+PgUp/PgDn", "编辑时翻预览页"},
+			{"↑ ↓ / j k", "预览上下滚动"}, {"Space / PgDn", "预览向下翻页"}, {"PgUp", "当前面板向上翻页"}, {"Alt+↑ / ↓", "编辑时滚动预览"}, {"Alt+PgUp/PgDn", "编辑时翻预览页"},
 		}},
 		{"保存与退出", save},
 	}

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"fmt"
@@ -46,6 +46,7 @@ func renderWithRenderer(renderer markdownRenderer, source string, width int) (st
 		lines[i] = expandTabs(lines[i])
 	}
 	source = strings.Join(lines, "\n")
+	source = expandMermaid(source, width)
 	expanded := expandMath(source, max(10, width-4))
 	result, err := renderer.Render(expanded)
 	return strings.Trim(result, "\n"), err

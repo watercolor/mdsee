@@ -7,9 +7,9 @@ Go 编写的终端 Markdown 编辑器。默认以 Vim Normal 模式打开仅预�
 构建需要 **Go 1.25.8 或更新版本**。
 
 ```sh
-go build -o bin/mdcli .
+go build -o bin/mdcli ./cmd/mdcli
 ./bin/mdcli examples/demo.md
-./bin/mdcli notes.md
+./bin/mdcli notes.md examples/demo.md
 ```
 
 文件不存在时打开空白缓冲区，第一次保存才创建文件；父目录必须已存在。不指定路径时打开当前目录的 `untitled.md`。
@@ -17,9 +17,25 @@ go build -o bin/mdcli .
 Windows：
 
 ```powershell
-go build -o bin/mdcli.exe .
+go build -o bin/mdcli.exe ./cmd/mdcli
 .\bin\mdcli.exe examples\demo.md
 ```
+
+## 目录结构
+
+```text
+cmd/mdcli/main.go       命令入口
+internal/app/          终端界面、编辑、导航、Markdown 和图片渲染
+  app.go
+  app_test.go          同包测试，其他模块同样使用 *_test.go
+  cli.go
+  ...
+main.go                兼容根目录构建和运行的薄入口
+docs/                  功能待办文档
+examples/              示例 Markdown 和图片
+```
+
+Go 按包组织代码，`*_test.go` 与被测源码放在同一目录，执行 `go test` 时参与编译。当前应用代码集中在 `internal/app` 包。`cmd/mdcli` 为主要入口，根目录也支持 `go build .` 和 `go run .`。布局参考 [Go 官方项目组织指南](https://go.dev/doc/modules/layout)。
 
 ## 功能
 
@@ -134,6 +150,31 @@ mdcli --help
 
 `--theme` 可选 `dark`、`light`、`ascii`，控制 Markdown 预览样式。`--print` 输出到文件或管道时移除 ANSI 颜色。参数省略时使用仅预览布局、Vim Normal 模式和 dark 主题。
 
+预览中按空格键或 PgDn 向下翻一页，PgUp 向上翻页。编辑区和搜索输入中的空格用于输入文字。
+
+## 搜索、目录与多文件
+
+- 预览与 Vim Normal 中按 `/` 在底部输入搜索，Enter 跳到下一处，`n` / `N` 循环查找下一处和上一处，也支持 `3n` 等次数。空输入按 Enter 重复上次搜索，Esc 取消本次输入。匹配高亮并显示计数，采用逐行、区分大小写的字面匹配。`F3` / `Shift+F3` 也可切换匹配。
+- 预览中按 `o` 打开居中的目录浮层，显示标题缩进、H1–H6 层级、当前位置和选中高亮。`j/k` 或方向键选择，Enter 同时定位源码与预览，Esc 或 `o` 关闭。按 `/` 输入标题模糊过滤，Esc 返回列表选择，再按 Esc 关闭。`F8` 在编辑区也能打开目录，支持 ATX 和 Setext 标题。`Alt+[` / `Alt+]` 跳到上一章和下一章。
+- 命令行可传入多个文件。预览与 Vim Normal 中用 `Tab` / `Shift+Tab` 切换前后文件，`F10` 打开缓冲区列表，`Ctrl+Tab` / `Ctrl+Shift+Tab` 也可切换。各文件保留光标、滚动位置、撤销历史、搜索和未保存内容。Vim Insert 与普通编辑中的 Tab 用于缩进，Vim Normal 中的 `o` 在当前行下方新建行。
+- `F9` 扫描 Git 仓库根目录，仓库外扫描当前目录，递归发现 `.md` 和 `.markdown` 文件，跳过 `.git`、`node_modules` 和 `vendor` 目录。输入路径片段过滤，Enter 打开文件或切换到已有缓冲区。
+- `Ctrl+S` 保存当前文件。退出时检查全部缓冲区，选择 S 保存全部后退出，D 放弃全部修改后退出。`:wq` 保存全部后退出，`:q` 检查全部文件，`:q!` 放弃全部修改退出。
+
+文件选择面板使用 Esc 返回。Vim 中的 `Ctrl+F` / `Ctrl+B` 分别向下和向上翻整页。
+
+## Mermaid 字符图
+
+预览及 `--print` 支持 `mermaid` 围栏中的基础 `flowchart` 和 `graph`。方向包括 TD、TB、BT、LR、RL，节点支持 `A`、`A[文字]`、`A(文字)`、`A{文字}`，连线支持 `-->`、`---`、`-.->`、`==>` 和 `-->|标签|`，也支持链式连接、分支、循环及独立节点。
+
+```mermaid
+flowchart LR
+A[开始] --> B{检查}
+B -->|通过| C[完成]
+B -.-> A
+```
+
+字符图逐条连线展示节点关系，分支和循环中的节点会重复显示，节点形状统一为方框。横向连线在宽度不足时改为纵向排列。子图、样式、复杂节点和其他图类型会显示未渲染提示并保留源码。
+
 ## 图片预览
 
 图片需独占一个 Markdown 段落，前后用空行分隔：
@@ -144,7 +185,7 @@ mdcli --help
 ![含空格的路径](<assets/my photo.jpg>)
 ```
 
-相对路径以 Markdown 文件所在目录为基准，支持绝对路径、百分号编码路径、`file:///` 本地绝对路径及引用式图片。网络图片使用 HTTP 或 HTTPS 地址，查询参数会随请求发送，支持重定向。支持 PNG、JPEG 和 GIF 首帧。行内图片、表格中的图片和 HTML `<img>` 保留文字表现。SVG、WebP、GIF 动画和 Mermaid 尚未接入。
+相对路径以 Markdown 文件所在目录为基准，支持绝对路径、百分号编码路径、`file:///` 本地绝对路径及引用式图片。网络图片使用 HTTP 或 HTTPS 地址，查询参数会随请求发送，支持重定向。支持 PNG、JPEG 和 GIF 首帧。行内图片、表格中的图片和 HTML `<img>` 保留文字表现。SVG、WebP 和 GIF 动画尚未接入。
 
 ```markdown
 ![Go 标志](https://go.dev/blog/go-brand/Go-Logo/PNG/Go-Logo_Blue.png)
@@ -202,9 +243,9 @@ go test ./...
 go test -race ./...
 go vet ./...
 
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/mdcli-darwin-arm64 .
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/mdcli-linux-amd64 .
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/mdcli-windows-amd64.exe .
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/mdcli-darwin-arm64 ./cmd/mdcli
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/mdcli-linux-amd64 ./cmd/mdcli
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/mdcli-windows-amd64.exe ./cmd/mdcli
 ```
 
 跨平台编译成功不代表已在对应操作系统和每种终端中完成交互验证。

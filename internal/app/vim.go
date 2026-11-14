@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"strconv"
@@ -282,11 +282,11 @@ func (m *model) commandInput(msg tea.Msg) tea.Cmd {
 		case "w":
 			m.save()
 		case "wq", "x":
-			if m.save() {
+			if m.saveAllBuffers() {
 				return tea.Quit
 			}
 		case "q":
-			if !m.dirty() {
+			if !m.hasDirtyBuffers() {
 				return tea.Quit
 			}
 			m.status = "未保存；使用 :w 保存或 :q! 放弃修改"

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"bytes"
@@ -128,14 +128,14 @@ func TestPrintAndInvalidCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := run([]string{"--print", path}, &out); err != nil {
+	if err := Run([]string{"--print", path}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "x²") || strings.Contains(out.String(), "\x1b") {
 		t.Fatal(out.String())
 	}
 	for _, args := range [][]string{{"--mode", "invalid"}, {"--theme", "invalid"}, {"--width", "0"}, {"--print", path + "missing"}, {"one.md", "two.md"}} {
-		if err := run(args, &out); err == nil {
+		if err := Run(args, &out); err == nil {
 			t.Fatalf("应拒绝参数 %v", args)
 		}
 	}
@@ -177,6 +177,30 @@ func TestHelpNavigationAndCursorVisibility(t *testing.T) {
 		m.Update(press('w', tea.ModCtrl))
 		if m.View().Cursor != nil {
 			t.Fatal("预览区不应显示编辑光标")
+		}
+	}
+}
+
+func TestSpacePagesPreviewAndPreservesEditing(t *testing.T) {
+	for _, vim := range []bool{true, false} {
+		m := testModel(t)
+		m.vim.enabled = vim
+		m.previewFocus = true
+		m.preview.SetContent(strings.Repeat("line\n", 100))
+		m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+		if m.preview.YOffset() == 0 {
+			t.Fatal("space must page down in preview")
+		}
+		m.previewFocus = false
+		m.vim.insert = true
+		m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+		if m.editor.text() != " " {
+			t.Fatal("space must insert in editing mode")
+		}
+		m.openNavigation("搜索")
+		m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+		if m.nav.query != " " {
+			t.Fatal("space must remain part of the search query")
 		}
 	}
 }

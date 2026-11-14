@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"bytes"
@@ -427,13 +427,13 @@ func TestImagesOffNoColorAndPrint(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := run([]string{"--print", "--images", "kitty", doc}, &out); err != nil {
+	if err := Run([]string{"--print", "--images", "kitty", doc}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "\x1b") || strings.Contains(out.String(), "▀") || strings.ContainsRune(out.String(), kitty.Placeholder) {
 		t.Fatal("print must stay textual")
 	}
-	if err := run([]string{"--images", "invalid", doc}, &out); err == nil {
+	if err := Run([]string{"--images", "invalid", doc}, &out); err == nil {
 		t.Fatal("invalid image mode accepted")
 	}
 }
