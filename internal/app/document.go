@@ -88,7 +88,7 @@ func (d *document) save(text string) error {
 	if d.bom {
 		data = "\ufeff" + data
 	}
-	f, err := os.CreateTemp(filepath.Dir(d.path), ".mdcli-*")
+	f, err := os.CreateTemp(filepath.Dir(d.path), ".mdsee-*")
 	if err != nil {
 		return err
 	}

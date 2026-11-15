@@ -14,7 +14,7 @@ import (
 
 // Run parses command arguments and starts the terminal editor or print mode.
 func Run(args []string, out io.Writer) error {
-	fs := flag.NewFlagSet("mdcli", flag.ContinueOnError)
+	fs := flag.NewFlagSet("mdsee", flag.ContinueOnError)
 	fs.SetOutput(out)
 	modeFlag := fs.String("mode", "preview", "初始布局：split / edit / preview")
 	theme := fs.String("theme", "dark", "界面与预览主题：dark / light / ascii")
@@ -26,7 +26,7 @@ func Run(args []string, out io.Writer) error {
 	cacheMiB := fs.Int64("mermaid-cache-mib", defaultMermaidCacheBytes>>20, "Mermaid 磁盘缓存容量 MiB，0 关闭持久化")
 	clearCache := fs.Bool("clear-mermaid-cache", false, "清理 Mermaid 磁盘缓存后退出")
 	fs.Usage = func() {
-		fmt.Fprint(out, "用法：mdcli [选项] [文件.md ...]\n不指定文件时编辑当前目录的 untitled.md。\n\n")
+		fmt.Fprint(out, "用法：mdsee [选项] [文件.md ...]\n不指定文件时编辑当前目录的 untitled.md。\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

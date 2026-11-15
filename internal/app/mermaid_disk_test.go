@@ -70,18 +70,18 @@ func TestMermaidDiskAcrossSessionsAndFooter(t *testing.T) {
 	m.diagrams = second
 	m.diagramKeys = []string{key}
 	m.width = 120
-	if header := m.headerLine(" MDCLI note.md"); !strings.Contains(header, "缓存命中 1") {
+	if header := m.headerLine(" MDSEE note.md"); !strings.Contains(header, "缓存命中 1") {
 		t.Fatal(header)
 	}
 	m.status = "已切换文件"
-	if header := m.headerLine(" MDCLI note.md"); !strings.Contains(header, "缓存命中 1") {
+	if header := m.headerLine(" MDSEE note.md"); !strings.Contains(header, "缓存命中 1") {
 		t.Fatal(header)
 	}
 	if footer := m.statusLine("NORMAL"); !strings.Contains(footer, m.status) {
 		t.Fatal("cache status replaced the action message", footer)
 	}
 	m.width = 40
-	if header := m.headerLine(" MDCLI note.md"); !strings.Contains(header, "缓存1") {
+	if header := m.headerLine(" MDSEE note.md"); !strings.Contains(header, "缓存1") {
 		t.Fatal(header)
 	}
 	old := time.Now().Add(-time.Hour)
@@ -232,7 +232,7 @@ func TestMermaidDiskClearAndAbandonedWrites(t *testing.T) {
 func TestMermaidDiskConcurrentRenderAndLockCancellation(t *testing.T) {
 	root := t.TempDir()
 	countPath := filepath.Join(t.TempDir(), "count")
-	t.Setenv("MDCLI_MMDC_COUNT", countPath)
+	t.Setenv("MDSEE_MMDC_COUNT", countPath)
 	first, second := helperMermaidCache(t), helperMermaidCache(t)
 	first.configureDisk(root, defaultMermaidCacheBytes)
 	second.configureDisk(root, defaultMermaidCacheBytes)

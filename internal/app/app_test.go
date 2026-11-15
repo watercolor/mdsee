@@ -304,7 +304,7 @@ func TestShortcutHintsStayVisibleWithMermaidStatus(t *testing.T) {
 					t.Fatal("unexpected footer hint", footer)
 				}
 			}
-			if ansi.StringWidth(footer) > width || ansi.StringWidth(m.headerLine(" MDCLI note.md")) > width {
+			if ansi.StringWidth(footer) > width || ansi.StringWidth(m.headerLine(" MDSEE note.md")) > width {
 				t.Fatal("status exceeded terminal width", width)
 			}
 		}

@@ -24,7 +24,7 @@ type codeBlockRenderer struct {
 
 func newCodeBlockRenderer(theme string) *codeBlockRenderer {
 	p := paletteFor(theme)
-	style := chroma.MustNewStyle("mdcli-"+theme, chroma.StyleEntries{
+	style := chroma.MustNewStyle("mdsee-"+theme, chroma.StyleEntries{
 		chroma.Text: p.codeText, chroma.Background: "bg:" + p.codeBackground,
 		chroma.Comment: p.codeComment, chroma.Keyword: p.codeKeyword,
 		chroma.LiteralString: p.codeString, chroma.LiteralNumber: p.codeNumber,

@@ -41,7 +41,7 @@ func defaultMermaidCacheDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "mdcli", "mermaid", "v1"), nil
+	return filepath.Join(root, "mdsee", "mermaid", "v1"), nil
 }
 
 // Resolve renderer identity without starting Node on cache hits. npm package

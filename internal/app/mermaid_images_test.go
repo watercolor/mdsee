@@ -24,7 +24,7 @@ import (
 
 // The test binary stands in for mmdc so process and PNG handling work on all platforms.
 func init() {
-	if os.Getenv("MDCLI_MMDC_HELPER") != "1" {
+	if os.Getenv("MDSEE_MMDC_HELPER") != "1" {
 		return
 	}
 	args := os.Args
@@ -48,7 +48,7 @@ func init() {
 	if input == "" || output == "" {
 		os.Exit(3)
 	}
-	if countPath := os.Getenv("MDCLI_MMDC_COUNT"); countPath != "" {
+	if countPath := os.Getenv("MDSEE_MMDC_COUNT"); countPath != "" {
 		file, err := os.OpenFile(countPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
 			os.Exit(7)
@@ -106,7 +106,7 @@ func init() {
 // Child copies of the test binary handle the mmdc arguments before test flag parsing.
 func helperMermaidCache(t *testing.T) *mermaidImageCache {
 	t.Helper()
-	t.Setenv("MDCLI_MMDC_HELPER", "1")
+	t.Setenv("MDSEE_MMDC_HELPER", "1")
 	binary, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestMermaidCloseCancelsAndDrains(t *testing.T) {
 }
 
 func TestMermaidMmdcDiscoveryAndNestedImages(t *testing.T) {
-	t.Setenv("MDCLI_MMDC_HELPER", "1")
+	t.Setenv("MDSEE_MMDC_HELPER", "1")
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -317,29 +317,29 @@ func TestMermaidStatusProgressAndCurrentDocument(t *testing.T) {
 	}
 	m.status = "已保存"
 	m.width = 100
-	header := m.headerLine(" MDCLI note.md")
+	header := m.headerLine(" MDSEE note.md")
 	for _, want := range []string{"mmdc 渲染中 1/3", "运行 1", "排队 1"} {
 		if !strings.Contains(header, want) {
 			t.Fatal(header)
 		}
 	}
 	m.width = 30
-	header = m.headerLine(" MDCLI note.md")
+	header = m.headerLine(" MDSEE note.md")
 	if !strings.Contains(header, "渲染 1/3") || ansi.StringWidth(header) > 30 {
 		t.Fatal(header)
 	}
 	m.status = ""
 	m.width = 100
 	m.diagramKeys = []string{"ready"}
-	if !strings.Contains(m.headerLine(" MDCLI note.md"), "已完成 1/1") {
+	if !strings.Contains(m.headerLine(" MDSEE note.md"), "已完成 1/1") {
 		t.Fatal("other documents must not keep this document pending")
 	}
 	m.diagramKeys = []string{"failed"}
-	if header := m.headerLine(" MDCLI note.md"); !strings.Contains(header, "缺少浏览器") || !strings.Contains(header, "字符回退") {
+	if header := m.headerLine(" MDSEE note.md"); !strings.Contains(header, "缺少浏览器") || !strings.Contains(header, "字符回退") {
 		t.Fatal(header)
 	}
 	m.diagrams.binary = ""
-	if !strings.Contains(m.headerLine(" MDCLI note.md"), "未检测到 mmdc") {
+	if !strings.Contains(m.headerLine(" MDSEE note.md"), "未检测到 mmdc") {
 		t.Fatal("missing executable status")
 	}
 	m.switchBuffer(0)

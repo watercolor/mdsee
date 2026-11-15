@@ -146,7 +146,7 @@ func (c *remoteImageCache) download(address string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("网络图片 URL 无效")
 	}
-	req.Header.Set("User-Agent", "mdcli")
+	req.Header.Set("User-Agent", "mdsee")
 	req.Header.Set("Accept", "image/png,image/jpeg,image/gif,image/*;q=0.8")
 	response, err := c.client.Do(req)
 	if err != nil {

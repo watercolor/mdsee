@@ -1,6 +1,7 @@
 /bin/
 /dist/
-/mdcli
-/mdcli.exe
+/mdsee
+/mdsee.exe
+/tags
 *.test
 .DS_Store

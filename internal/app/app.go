@@ -505,7 +505,7 @@ func (m *model) View() tea.View {
 		mark = " • 未保存"
 	}
 	p := paletteFor(m.theme)
-	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(p.title)).Render(m.headerLine(" MDCLI  " + filepath.Base(m.doc.path) + mark + "  / " + m.mode.String()))
+	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(p.title)).Render(m.headerLine(" MDSEE  " + filepath.Base(m.doc.path) + mark + "  / " + m.mode.String()))
 	var body string
 	if m.nav.kind != "" && m.nav.kind != "目录" && m.nav.kind != "搜索" {
 		body = m.navigationView()

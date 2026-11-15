@@ -90,7 +90,7 @@ func markdownStyles(theme string) (ansi.StyleConfig, error) {
 
 func expandMath(source string, width int) string {
 	// Protect code identified by CommonMark, including indented and nested blocks.
-	marker := "MDCLILITERALDOLLAR"
+	marker := "MDSEELITERALDOLLAR"
 	for strings.Contains(source, marker) {
 		marker += "X"
 	}

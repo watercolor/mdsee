@@ -1,4 +1,4 @@
-# mdcli
+# mdsee
 
 Go 编写的终端 Markdown 编辑器。默认以 Vim Normal 模式打开仅预览界面，支持代码块高亮与 LaTeX 文本公式。按 Ctrl+P / F5 切换到双列或编辑布局。无需浏览器、Node.js 或本地 TeX 安装。
 
@@ -7,9 +7,9 @@ Go 编写的终端 Markdown 编辑器。默认以 Vim Normal 模式打开仅预�
 构建需要 **Go 1.25.8 或更新版本**。
 
 ```sh
-go build -o bin/mdcli ./cmd/mdcli
-./bin/mdcli examples/demo.md
-./bin/mdcli notes.md examples/demo.md
+go build -o bin/mdsee ./cmd/mdsee
+./bin/mdsee examples/demo.md
+./bin/mdsee notes.md examples/demo.md
 ```
 
 文件不存在时打开空白缓冲区，第一次保存才创建文件；父目录必须已存在。不指定路径时打开当前目录的 `untitled.md`。
@@ -17,14 +17,14 @@ go build -o bin/mdcli ./cmd/mdcli
 Windows：
 
 ```powershell
-go build -o bin/mdcli.exe ./cmd/mdcli
-.\bin\mdcli.exe examples\demo.md
+go build -o bin/mdsee.exe ./cmd/mdsee
+.\bin\mdsee.exe examples\demo.md
 ```
 
 ## 目录结构
 
 ```text
-cmd/mdcli/main.go       命令入口
+cmd/mdsee/main.go       命令入口
 internal/app/          终端界面、编辑、导航、Markdown 和图片渲染
   app.go
   app_test.go          同包测试，其他模块同样使用 *_test.go
@@ -35,7 +35,7 @@ docs/                  功能待办文档
 examples/              示例 Markdown 和图片
 ```
 
-Go 按包组织代码，`*_test.go` 与被测源码放在同一目录，执行 `go test` 时参与编译。当前应用代码集中在 `internal/app` 包。`cmd/mdcli` 为主要入口，根目录也支持 `go build .` 和 `go run .`。布局参考 [Go 官方项目组织指南](https://go.dev/doc/modules/layout)。
+Go 按包组织代码，`*_test.go` 与被测源码放在同一目录，执行 `go test` 时参与编译。当前应用代码集中在 `internal/app` 包。`cmd/mdsee` 为主要入口，根目录也支持 `go build .` 和 `go run .`。布局参考 [Go 官方项目组织指南](https://go.dev/doc/modules/layout)。
 
 ## 功能
 
@@ -55,9 +55,9 @@ Go 按包组织代码，`*_test.go` 与被测源码放在同一目录，执行 `
 
 源码编辑区以原文显示；语法高亮位于预览中的代码块。长源码行横向滚动，预览正文按宽度折行。
 
-标题样式示例：`./bin/mdcli examples/headings.md`。当前标题与正文使用相同字号；局部放大字体需要终端专用协议（例如 [Kitty Text Sizing](https://sw.kovidgoyal.net/kitty/text-sizing-protocol/)），本版未接入。粗体的具体字重取决于终端和字体设置。
+标题样式示例：`./bin/mdsee examples/headings.md`。当前标题与正文使用相同字号；局部放大字体需要终端专用协议（例如 [Kitty Text Sizing](https://sw.kovidgoyal.net/kitty/text-sizing-protocol/)），本版未接入。粗体的具体字重取决于终端和字体设置。
 
-如果终端设置了 `NO_COLOR=1`，颜色和底色会被关闭。macOS / Linux 可用 `env -u NO_COLOR ./bin/mdcli examples/headings.md` 临时启用颜色；这不会修改系统配置。
+如果终端设置了 `NO_COLOR=1`，颜色和底色会被关闭。macOS / Linux 可用 `env -u NO_COLOR ./bin/mdsee examples/headings.md` 临时启用颜色；这不会修改系统配置。
 
 ## 快捷键
 
@@ -91,7 +91,7 @@ F1 帮助按编辑、窗口、浏览、保存分组，宽屏双列、窄屏单�
 ## Vim 模式
 
 ```sh
-./bin/mdcli --vim examples/demo.md
+./bin/mdsee --vim examples/demo.md
 ```
 
 `F4` 在普通编辑和 Vim 模式之间切换；启用时进入 **Normal**。状态栏显示 `VIM NORMAL` / `VIM INSERT`，按 `i` 输入，`Esc` 或 `Ctrl+C` 返回 Normal。预览区只接受浏览操作，即使从 Insert 切入预览，粘贴也不会修改原文。
@@ -142,14 +142,14 @@ F1 帮助按编辑、窗口、浏览、保存分组，宽屏双列、窄屏单�
 选项放在文件名前：
 
 ```sh
-mdcli --mode preview notes.md
-mdcli --mode edit notes.md
-mdcli --mode split --vim=false notes.md
-mdcli --vim notes.md
-mdcli --theme light notes.md
-mdcli --images blocks examples/images.md
-mdcli --print --width 100 notes.md
-mdcli --help
+mdsee --mode preview notes.md
+mdsee --mode edit notes.md
+mdsee --mode split --vim=false notes.md
+mdsee --vim notes.md
+mdsee --theme light notes.md
+mdsee --images blocks examples/images.md
+mdsee --print --width 100 notes.md
+mdsee --help
 ```
 
 `--theme` 可选 `dark`、`light`、`ascii`，控制界面和 Markdown 预览样式。`--print` 输出到文件或管道时移除 ANSI 颜色。参数省略时使用仅预览布局、Vim Normal 模式和 dark 主题。
@@ -157,8 +157,8 @@ mdcli --help
 深色采用 mdterm 的深蓝灰背景、浅色正文、蓝紫色标题和暖色行内代码。浅色采用浅灰背景、深色正文和对应的蓝紫色标题，代码区使用稍深的灰色底。代码语法高亮由 Chroma 提供，深色参考 base16-ocean，浅色参考 GitHub。未标注语言的代码块显示 `text`，未知语言按文本显示。代码块边框和标签也用于 `--print`，ASCII 输出保持纯文本样式。
 
 ```sh
-./bin/mdcli --theme dark examples/demo.md
-./bin/mdcli --theme light examples/demo.md
+./bin/mdsee --theme dark examples/demo.md
+./bin/mdsee --theme light examples/demo.md
 ```
 
 主题会设置应用运行期间的终端默认前景和背景，退出时由 Bubble Tea 恢复终端默认颜色。`NO_COLOR` 和 ASCII 模式使用终端原有默认颜色。配色参考见 [mdterm 主题源码](https://github.com/bahdotsh/mdterm/blob/main/src/theme.rs)。
@@ -184,13 +184,13 @@ mdcli --help
 - PNG 优先按 3 倍分辨率生成，超过单图大小或像素限制时依次尝试 2 倍、1 倍。Kitty 模式保留 Mermaid 原始像素，显示尺寸按生成倍率还原到原始排版大小，小图自然显示，宽图按面板宽度缩小，高图最多 256 行，可用空格或方向键滚动浏览。
 - 持久化缓存以 Mermaid 源码、主题、mmdc 安装标识和出图参数版本计算 SHA-256。同一张图跨文件、跨次启动复用，命中后直接显示，标题栏提示“缓存命中 N”。源码的 CRLF 换行统一为 LF，保留缩进。调整窗口时复用 PNG，按当前面板尺寸缩放。
 - 命中后校验 PNG 的 SHA-256 和尺寸头。Kitty 模式直接传输原始 PNG 压缩数据，省去逐图解码、重新压缩的开销；彩色字符模式按需解码采样。
-- 会话内最多保留 32 个图，使用最久未访问的已完成图为新图腾出空间，最多同时执行两个 `mmdc`。多个 mdcli 进程请求同一缓存图时通过文件锁合并生成。失败结果只在会话内保留 30 秒，之后重绘时可重试。
+- 会话内最多保留 32 个图，使用最久未访问的已完成图为新图腾出空间，最多同时执行两个 `mmdc`。多个 mdsee 进程请求同一缓存图时通过文件锁合并生成。失败结果只在会话内保留 30 秒，之后重绘时可重试。
 - 临时目录保存生成任务和会话副本。退出时取消任务并清理这些临时文件，成功的磁盘缓存继续保留。macOS、Linux 和 Windows 会尝试结束渲染进程树。
 - `--images off`、ASCII 主题、无颜色终端及 `--print` 使用字符渲染。
 
 ### Mermaid 缓存容量与清理
 
-默认容量为 **256 MiB**，统计缓存中的 PNG 和 JSON 元数据大小。目录通过 Go 的 `os.UserCacheDir()` 获取，macOS 默认在 `~/Library/Caches/mdcli/mermaid/v1`，可通过 `--mermaid-cache-dir` 指定。
+默认容量为 **256 MiB**，统计缓存中的 PNG 和 JSON 元数据大小。目录通过 Go 的 `os.UserCacheDir()` 获取，macOS 默认在 `~/Library/Caches/mdsee/mermaid/v1`，可通过 `--mermaid-cache-dir` 指定。
 
 - 启动和成功写入新图后检查容量，超限时按最近使用时间淘汰旧图，直到回到上限以内。会话内持续使用的图片最多每分钟更新一次磁盘访问时间。
 - 容量内的有效图片持续保留。源码、主题或渲染器变化后生成新缓存，旧图留待容量淘汰。mmdc 标识包含可执行文件路径、大小、修改时间，以及可读取的 npm 包元数据和 `PUPPETEER_EXECUTABLE_PATH`。更换字体或浏览器后可手动清理，重新生成。
@@ -199,34 +199,34 @@ mdcli --help
 
 ```sh
 # 设置为 128 MiB，每次启动可指定
-./bin/mdcli --mermaid-cache-mib 128 examples/mermaid.md
+./bin/mdsee --mermaid-cache-mib 128 examples/mermaid.md
 
 # 关闭持久化，继续使用会话缓存
-./bin/mdcli --mermaid-cache-mib 0 examples/mermaid.md
+./bin/mdsee --mermaid-cache-mib 0 examples/mermaid.md
 
 # 清理默认缓存并退出
-./bin/mdcli --clear-mermaid-cache
+./bin/mdsee --clear-mermaid-cache
 
 # 使用自定义缓存目录，清理时指定相同目录
-./bin/mdcli --mermaid-cache-dir /tmp/mdcli-cache examples/mermaid.md
-./bin/mdcli --mermaid-cache-dir /tmp/mdcli-cache --clear-mermaid-cache
+./bin/mdsee --mermaid-cache-dir /tmp/mdsee-cache examples/mermaid.md
+./bin/mdsee --mermaid-cache-dir /tmp/mdsee-cache --clear-mermaid-cache
 ```
 
 ### 渲染器与安装
 
 字符引擎使用 `mermaidtext v0.1.1`，覆盖流程图、时序图、状态图、类图和 ER 图的部分语法。思维导图和甘特图需要 `mmdc` 图片路径，字符引擎会为这两类图保留带框的源码。布局超宽或语法不支持时也会保留源码。每个图的源码最多 64 KiB，生成图片沿用单图 10 MiB、800 万像素等限制。
 
-安装和检查 Mermaid CLI 后重新启动 mdcli，即可使用图片路径。
+安装和检查 Mermaid CLI 后重新启动 mdsee，即可使用图片路径。
 
 ```sh
 npm install -g @mermaid-js/mermaid-cli
 mmdc --version
-./bin/mdcli examples/mermaid.md
+./bin/mdsee examples/mermaid.md
 ```
 
 `mmdc` 还需要可用的浏览器运行环境，安装与故障处理见 [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli)。字符引擎的语法范围、宽度回退和 Apache-2.0 许可证见 [mermaidtext](https://github.com/spacedock-dev/mermaidtext)。
 
-如果提示缺少 `chrome-headless-shell`，需要通过当前 mmdc 所使用的 Puppeteer 安装匹配版本的浏览器。安装完成后重新打开 mdcli，可清除本次会话的失败缓存。显示大小按原始排版尺寸计算，默认以图中文字接近终端正文大小为目标，调整窗口时会重新计算布局。
+如果提示缺少 `chrome-headless-shell`，需要通过当前 mmdc 所使用的 Puppeteer 安装匹配版本的浏览器。安装完成后重新打开 mdsee，可清除本次会话的失败缓存。显示大小按原始排版尺寸计算，默认以图中文字接近终端正文大小为目标，调整窗口时会重新计算布局。
 
 
 ## 图片预览
@@ -258,11 +258,11 @@ mmdc --version
 
 tmux 内使用 `blocks`，包括显式指定 `kitty` 时；本版未接入 tmux 图片透传。无颜色能力的终端、`NO_COLOR` 非空、`--theme ascii` 或 `--print` 时使用文字形式。彩色字符在 256 色终端上由终端渲染库降低颜色精度。
 
-iTerm2 的自动识别使用终端实际返回的名称和版本，不依赖 `TERM_PROGRAM` 环境变量。iTerm2 3.7.3 及以上正式版可直接运行 `./bin/mdcli examples/images.md`；未识别的版本仍可用 `--images kitty` 手动尝试。版本下限依据 [iTerm2 更新记录](https://iterm2.com/downloads.html)中对图片 ID 高位占位符的修复。
+iTerm2 的自动识别使用终端实际返回的名称和版本，不依赖 `TERM_PROGRAM` 环境变量。iTerm2 3.7.3 及以上正式版可直接运行 `./bin/mdsee examples/images.md`；未识别的版本仍可用 `--images kitty` 手动尝试。版本下限依据 [iTerm2 更新记录](https://iterm2.com/downloads.html)中对图片 ID 高位占位符的修复。
 
 图片按可用宽度和终端字符比例缩放，普通图片最高 24 行、最宽 100 列，Kitty 模式的 Mermaid 图片最高 256 行。无法取得字符尺寸时按宽高比 1:2 估算。滚动和分屏裁剪跟随文本视口，切换到编辑或帮助页会隐藏图像。编辑文档或调整窗口时重新读取本地图片，网络图片复用缓存。每次预览最多加载 32 个不同图片地址，单图不超过 10 MiB、800 万像素，缺失、损坏或超限时在图片位置显示提示。
 
-示例：`./bin/mdcli examples/images.md`。Kitty 实现依据其[图形协议](https://sw.kovidgoyal.net/kitty/graphics-protocol/#unicode-placeholders)，没有新增浏览器、Node.js 或外部图片工具依赖。
+示例：`./bin/mdsee examples/images.md`。Kitty 实现依据其[图形协议](https://sw.kovidgoyal.net/kitty/graphics-protocol/#unicode-placeholders)，没有新增浏览器、Node.js 或外部图片工具依赖。
 
 ## 公式支持范围
 
@@ -297,9 +297,9 @@ go test ./...
 go test -race ./...
 go vet ./...
 
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/mdcli-darwin-arm64 ./cmd/mdcli
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/mdcli-linux-amd64 ./cmd/mdcli
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/mdcli-windows-amd64.exe ./cmd/mdcli
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/mdsee-darwin-arm64 ./cmd/mdsee
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/mdsee-linux-amd64 ./cmd/mdsee
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/mdsee-windows-amd64.exe ./cmd/mdsee
 ```
 
 跨平台编译成功不代表已在对应操作系统和每种终端中完成交互验证。

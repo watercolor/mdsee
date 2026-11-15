@@ -225,7 +225,7 @@ func TestDirectoryOverlayPreservesBackground(t *testing.T) {
 	m.openNavigation("目录")
 	view := ansi.Strip(m.View().Content)
 	rows := strings.Split(view, "\n")
-	if !strings.Contains(rows[0], "MDCLI") || !strings.Contains(view, "BACKGROUND") {
+	if !strings.Contains(rows[0], "MDSEE") || !strings.Contains(view, "BACKGROUND") {
 		t.Fatal("overlay must preserve the document background")
 	}
 	if strings.Index(rows[0], "目录 (") >= 0 {

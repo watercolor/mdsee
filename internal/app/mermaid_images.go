@@ -124,7 +124,7 @@ func (c *mermaidImageCache) preview(source, theme string, images *imageRenderer)
 	}
 
 	if c.dir == "" {
-		dir, err := os.MkdirTemp("", "mdcli-mermaid-*")
+		dir, err := os.MkdirTemp("", "mdsee-mermaid-*")
 		if err != nil {
 			return "", "无法创建 Mermaid 临时目录"
 		}
