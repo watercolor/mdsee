@@ -30,8 +30,12 @@ func newMarkdownRenderer(width int, theme string, images ...*imageRenderer) (mar
 	if err != nil {
 		return nil, err
 	}
-	if len(images) > 0 && images[0] != nil && images[0].mode != "off" {
-		return newImageMarkdownRenderer(width, style, images[0]), nil
+	if theme != "ascii" {
+		imageState := newImageRenderer("off", "", theme, width, 0, .5)
+		if len(images) > 0 && images[0] != nil {
+			imageState = images[0]
+		}
+		return newImageMarkdownRenderer(width, style, imageState), nil
 	}
 	return glamour.NewTermRenderer(
 		glamour.WithStyles(style),
@@ -46,7 +50,7 @@ func renderWithRenderer(renderer markdownRenderer, source string, width int) (st
 		lines[i] = expandTabs(lines[i])
 	}
 	source = strings.Join(lines, "\n")
-	if _, imageMode := renderer.(*imageMarkdownRenderer); !imageMode {
+	if r, imageMode := renderer.(*imageMarkdownRenderer); !imageMode || r.images.mode == "off" {
 		source = expandMermaid(source, width)
 	}
 	expanded := expandMath(source, max(10, width-4))
@@ -56,30 +60,31 @@ func renderWithRenderer(renderer markdownRenderer, source string, width int) (st
 
 func markdownStyles(theme string) (ansi.StyleConfig, error) {
 	style := styles.DarkStyleConfig
-	colors := [6]string{"#f0fdfa", "#5eead4", "#93c5fd", "#c4b5fd", "#a5b4fc", "#cbd5e1"}
-	background := "#115e59"
 	switch theme {
 	case "dark":
 	case "light":
 		style = styles.LightStyleConfig
-		colors = [6]string{"#ffffff", "#0f766e", "#1d4ed8", "#6d28d9", "#4338ca", "#475569"}
-		background = "#0f766e"
 	case "ascii":
 		return styles.ASCIIStyleConfig, nil
 	default:
 		return ansi.StyleConfig{}, fmt.Errorf("未知预览主题：%s", theme)
 	}
-	bold, underline := true, true
+	p := paletteFor(theme)
+	style.Document.Color = &p.foreground
+	style.Document.BackgroundColor = &p.background
+	bold := true
 	headings := []*ansi.StyleBlock{&style.H1, &style.H2, &style.H3, &style.H4, &style.H5, &style.H6}
 	for i, heading := range headings {
 		*heading = ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{
 			Bold:  &bold,
-			Color: &colors[i],
+			Color: &p.headings[i],
 		}}
 	}
-	style.H1.Prefix, style.H1.Suffix = " ", " "
-	style.H1.BackgroundColor = &background
-	style.H2.Underline = &underline
+	style.Code.Color, style.Code.BackgroundColor = &p.inlineForeground, &p.inlineBackground
+	style.Link.Color, style.LinkText.Color = &p.headings[1], &p.headings[1]
+	style.Image.Color, style.ImageText.Color = &p.headings[3], &p.muted
+	style.HorizontalRule.Color = &p.border
+	style.Table.Color = &p.foreground
 	return style, nil
 }
 

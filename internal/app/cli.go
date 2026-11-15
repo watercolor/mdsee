@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -16,11 +17,14 @@ func Run(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("mdcli", flag.ContinueOnError)
 	fs.SetOutput(out)
 	modeFlag := fs.String("mode", "preview", "初始布局：split / edit / preview")
-	theme := fs.String("theme", "dark", "预览主题：dark / light / ascii")
+	theme := fs.String("theme", "dark", "界面与预览主题：dark / light / ascii")
 	printOnly := fs.Bool("print", false, "输出预览后退出（可重定向）")
 	width := fs.Int("width", 80, "--print 输出宽度")
 	vim := fs.Bool("vim", true, "启用 Vim Normal 模式，--vim=false 关闭（F4 切换）")
 	images := fs.String("images", "auto", "图片：auto / kitty / blocks / off；--print 输出文字")
+	cacheDir := fs.String("mermaid-cache-dir", "", "Mermaid 磁盘缓存目录（默认系统用户缓存目录）")
+	cacheMiB := fs.Int64("mermaid-cache-mib", defaultMermaidCacheBytes>>20, "Mermaid 磁盘缓存容量 MiB，0 关闭持久化")
+	clearCache := fs.Bool("clear-mermaid-cache", false, "清理 Mermaid 磁盘缓存后退出")
 	fs.Usage = func() {
 		fmt.Fprint(out, "用法：mdcli [选项] [文件.md ...]\n不指定文件时编辑当前目录的 untitled.md。\n\n")
 		fs.PrintDefaults()
@@ -29,6 +33,25 @@ func Run(args []string, out io.Writer) error {
 		if err == flag.ErrHelp {
 			return nil
 		}
+		return err
+	}
+	if *cacheMiB < 0 || *cacheMiB > (1<<63-1)/(1<<20) {
+		return fmt.Errorf("Mermaid 缓存容量无效")
+	}
+	if *clearCache {
+		root := *cacheDir
+		if root == "" {
+			var err error
+			root, err = defaultMermaidCacheDir()
+			if err != nil {
+				return err
+			}
+		}
+		disk := &mermaidDiskCache{root: root}
+		if err := disk.clear(context.Background()); err != nil {
+			return fmt.Errorf("清理 Mermaid 缓存：%w", err)
+		}
+		_, err := fmt.Fprintln(out, "Mermaid 磁盘缓存已清理："+root)
 		return err
 	}
 	if *printOnly && fs.NArg() > 1 {
@@ -76,6 +99,7 @@ func Run(args []string, out io.Writer) error {
 	m := newModel(d, mode, *theme, *vim)
 	defer m.close()
 	m.configureImages(*images)
+	m.diagrams.configureDisk(*cacheDir, *cacheMiB*(1<<20))
 	m.storeBuffer()
 	for _, path := range fs.Args()[min(1, fs.NArg()):] {
 		next, err := openDocument(path)

@@ -52,10 +52,12 @@ func sourceBlocks(source string) []int {
 	cursor := 0
 	for node := root.FirstChild(); node != nil; node = node.NextSibling() {
 		first := len(raw)
+		last := 0
 		_ = ast.Walk(node, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 			if entering && n.Type() != ast.TypeInline {
 				for i := 0; i < n.Lines().Len(); i++ {
 					first = min(first, n.Lines().At(i).Start)
+					last = max(last, n.Lines().At(i).Stop)
 				}
 			}
 			return ast.WalkContinue, nil
@@ -79,7 +81,13 @@ func sourceBlocks(source string) []int {
 		if len(blocks) == 0 || line > blocks[len(blocks)-1] {
 			blocks = append(blocks, line)
 		}
-		cursor = min(len(starts)-1, line+1)
+		cursor = max(line+1, lineAt(last))
+		if _, fenced := node.(*ast.FencedCodeBlock); fenced {
+			// Fenced-code segments omit the closing delimiter. Nodes without
+			// segments, such as a following thematic break, start after it.
+			cursor++
+		}
+		cursor = min(len(starts)-1, cursor)
 	}
 	return blocks
 }

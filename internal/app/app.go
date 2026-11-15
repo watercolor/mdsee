@@ -304,7 +304,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if key == "ctrl+q" || (key == "ctrl+c" && !m.vim.enabled) {
+		previewQuit := key == "q" && m.previewFocus && m.actualMode() != editMode &&
+			m.nav.kind == "" && !m.help && !m.vim.commandOpen
+		if key == "ctrl+q" || (key == "ctrl+c" && !m.vim.enabled) || previewQuit {
 			if m.hasDirtyBuffers() {
 				m.confirmQuit = true
 				return m, nil
@@ -482,9 +484,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func clipped(s string, width int) string { return ansi.Truncate(s, max(1, width), "…") }
 
 func (m *model) panel(title, content string, width int, focused bool) string {
-	color := "#515b70"
+	p := paletteFor(m.theme)
+	color := p.border
 	if focused {
-		color = "#67c8b3"
+		color = p.headings[1]
 	}
 	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(color)).Width(width + 2).Height(m.bodyHeight + 3)
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render(clipped(" "+title, width))
@@ -501,7 +504,8 @@ func (m *model) View() tea.View {
 	if m.dirty() {
 		mark = " • 未保存"
 	}
-	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#67c8b3")).Render(clipped(" MDCLI  "+filepath.Base(m.doc.path)+mark+"  / "+m.mode.String(), m.width))
+	p := paletteFor(m.theme)
+	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(p.title)).Render(m.headerLine(" MDCLI  " + filepath.Base(m.doc.path) + mark + "  / " + m.mode.String()))
 	var body string
 	if m.nav.kind != "" && m.nav.kind != "目录" && m.nav.kind != "搜索" {
 		body = m.navigationView()
@@ -510,11 +514,11 @@ func (m *model) View() tea.View {
 	} else {
 		switch m.actualMode() {
 		case editMode:
-			body = m.panel("原文", highlightMatches(m.editor.view(m.editorWidth, m.bodyHeight), m.searchQuery), m.editorWidth, !m.previewFocus)
+			body = m.panel("原文", highlightMatches(m.editor.view(m.editorWidth, m.bodyHeight, m.theme), m.searchQuery), m.editorWidth, !m.previewFocus)
 		case previewMode:
 			body = m.panel("预览 · ↑↓ / PgUp PgDn", highlightMatches(m.preview.View(), m.searchQuery), m.previewWidth, true)
 		default:
-			left := m.panel("原文", highlightMatches(m.editor.view(m.editorWidth, m.bodyHeight), m.searchQuery), m.editorWidth, !m.previewFocus)
+			left := m.panel("原文", highlightMatches(m.editor.view(m.editorWidth, m.bodyHeight, m.theme), m.searchQuery), m.editorWidth, !m.previewFocus)
 			right := m.panel("预览", highlightMatches(m.preview.View(), m.searchQuery), m.previewWidth, m.previewFocus)
 			body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 		}
@@ -542,6 +546,7 @@ func (m *model) View() tea.View {
 	if m.confirmQuit {
 		footer = clipped(" 未保存文件：S 全部保存并退出 · D 全部放弃 · Esc 返回", m.width)
 	}
+	footer = lipgloss.NewStyle().Foreground(lipgloss.Color(p.muted)).Render(footer)
 	content := strings.Join([]string{header, body, footer}, "\n")
 	if m.nav.kind == "目录" {
 		overlay := m.directoryView()
@@ -550,8 +555,17 @@ func (m *model) View() tea.View {
 			lipgloss.NewLayer(overlay).X((m.width-lipgloss.Width(overlay))/2).Y((m.height-lipgloss.Height(overlay))/2)))
 		content = canvas.Render()
 	}
-	v := tea.NewView(lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(content))
+	base := lipgloss.NewStyle().Width(m.width).Height(m.height).MaxWidth(m.width).MaxHeight(m.height)
+	styled := m.theme != "ascii" && os.Getenv("NO_COLOR") == ""
+	if styled {
+		base = base.Foreground(lipgloss.Color(p.foreground)).Background(lipgloss.Color(p.background))
+	}
+	v := tea.NewView(base.Render(content))
 	v.AltScreen = true
+	if styled {
+		v.BackgroundColor = lipgloss.Color(p.background)
+		v.ForegroundColor = lipgloss.Color(p.foreground)
+	}
 	if m.nav.kind == "搜索" {
 		v.Cursor = tea.NewCursor(min(m.width-1, ansi.StringWidth("/"+m.nav.query)), m.height-1)
 		v.Cursor.Shape = tea.CursorBar
@@ -573,30 +587,71 @@ func (m *model) View() tea.View {
 	return v
 }
 
-func (m *model) statusLine(right string) string {
+func (m *model) headerLine(title string) string {
 	progress := m.diagrams.progress(m.diagramKeys)
-	if progress.total > 0 && (progress.pending() || m.status == "") {
-		message := progress.message()
-		if m.width < 70 {
-			message = progress.compact()
-		}
-		reserve := min(ansi.StringWidth(message)+2, max(0, m.width-10))
-		right = ansi.Truncate(right, max(0, m.width-reserve-1), "…")
-		available := max(0, m.width-ansi.StringWidth(right)-1)
-		left := ansi.Truncate(" "+message, available, "…")
-		return left + strings.Repeat(" ", max(0, m.width-ansi.StringWidth(left)-ansi.StringWidth(right)-1)) + right + " "
+	if progress.total == 0 {
+		return clipped(title, m.width)
 	}
-	right = ansi.Truncate(right, max(0, m.width-1), "…")
+	message := progress.message()
+	if m.width < 70 {
+		message = progress.compact()
+	}
+	right := ansi.Truncate(message, max(0, m.width-14), "…")
+	left := clipped(title, max(1, m.width-ansi.StringWidth(right)-1))
+	return left + strings.Repeat(" ", max(1, m.width-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
+}
+
+func (m *model) shortcutHints() []string {
+	if m.help {
+		return []string{
+			" F1/Esc 返回  ↑↓ 滚动  PgUp/PgDn 翻页  Ctrl+Q 退出",
+			" F1/Esc 返回  ↑↓ 滚动",
+			" F1/Esc 返回",
+		}
+	}
+	if m.nav.kind != "" {
+		return []string{
+			" Esc 返回  Enter 确认  Ctrl+Q 退出",
+			" Esc 返回  Enter 确认",
+			" Esc 返回",
+		}
+	}
+	if m.previewFocus {
+		return []string{
+			" F1 帮助  o 目录  / 搜索  n/N 匹配  Space 翻页  Ctrl+P 布局  Ctrl+S 保存  q 退出",
+			" F1 帮助  o 目录  / 搜索  n/N 匹配  Space 翻页  q 退出",
+			" F1 帮助  o 目录  / 搜索  q 退出",
+			" o 目录  / 搜索  q 退出",
+		}
+	}
+	if m.vim.enabled && !m.vim.insert {
+		return []string{
+			" F1 帮助  F8 目录  / 搜索  n/N 匹配  Ctrl+P 布局  Ctrl+S 保存  Ctrl+Q 退出",
+			" F1 帮助  F8 目录  / 搜索  Ctrl+S 保存  Ctrl+Q 退出",
+			" F1 帮助  / 搜索  Ctrl+Q 退出",
+			" F1 帮助  Ctrl+Q 退出",
+		}
+	}
+	return []string{
+		" F1 帮助  F8 目录  Ctrl+P 布局  Ctrl+S 保存  Ctrl+Q 退出",
+		" F1 帮助  Ctrl+S 保存  Ctrl+Q 退出",
+		" F1 帮助  Ctrl+Q 退出",
+	}
+}
+
+func (m *model) statusLine(right string) string {
+	hints := m.shortcutHints()
+	rightWidth := max(0, m.width-1)
+	if m.status == "" {
+		rightWidth = max(0, rightWidth-ansi.StringWidth(hints[len(hints)-1]))
+	}
+	right = ansi.Truncate(right, rightWidth, "…")
 	available := max(0, m.width-ansi.StringWidth(right)-1)
 	left := ""
 	if m.status != "" {
 		left = " " + m.status
 	} else {
-		for _, hint := range []string{
-			" F1 帮助  F4 Vim  F7 联动  Ctrl+W 焦点  Ctrl+P 布局  Ctrl+S 保存  Ctrl+Q 退出",
-			" F1 帮助  Ctrl+P 布局  Ctrl+Q 退出",
-			" F1 帮助",
-		} {
+		for _, hint := range hints {
 			if ansi.StringWidth(hint) <= available {
 				left = hint
 				break

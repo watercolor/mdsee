@@ -104,7 +104,7 @@ func TestLayoutFitsTerminal(t *testing.T) {
 		for _, mode := range []viewMode{splitMode, editMode, previewMode} {
 			m.mode = mode
 			m.resize(size[0], size[1])
-			panel := m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight), m.editorWidth, true)
+			panel := m.panel("原文", m.editor.view(m.editorWidth, m.bodyHeight, m.theme), m.editorWidth, true)
 			if got := len(strings.Split(panel, "\n")); got != m.bodyHeight+3 {
 				t.Fatalf("panel wrapped: %d rows, want %d", got, m.bodyHeight+3)
 			}
@@ -202,5 +202,129 @@ func TestSpacePagesPreviewAndPreservesEditing(t *testing.T) {
 		if m.nav.query != " " {
 			t.Fatal("space must remain part of the search query")
 		}
+	}
+}
+
+func TestPreviewQuitShortcutAndUnsavedBuffers(t *testing.T) {
+	for _, mode := range []viewMode{previewMode, splitMode} {
+		for _, vim := range []bool{false, true} {
+			m := testModel(t)
+			m.mode, m.previewFocus, m.vim.enabled = mode, true, vim
+			_, cmd := m.Update(press('q'))
+			if cmd == nil {
+				t.Fatal("q did not quit the focused preview", mode, vim)
+			}
+			if _, quit := cmd().(tea.QuitMsg); !quit {
+				t.Fatal("q returned an unexpected command")
+			}
+			m.editor = newEditor("unsaved")
+			_, cmd = m.Update(press('q'))
+			if cmd != nil || !m.confirmQuit {
+				t.Fatal("q bypassed the unsaved-file prompt")
+			}
+			m.Update(press(tea.KeyEscape))
+			if m.confirmQuit || m.editor.text() != "unsaved" {
+				t.Fatal("canceling quit changed the document")
+			}
+			m.storeBuffer()
+			doc, err := openDocument(filepath.Join(t.TempDir(), "second.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.buffers = append(m.buffers, documentBuffer{doc: doc, editor: newEditor("")})
+			m.switchBuffer(1)
+			_, cmd = m.Update(press('q'))
+			if cmd != nil || !m.confirmQuit {
+				t.Fatal("q ignored an unsaved inactive buffer")
+			}
+		}
+	}
+}
+
+func TestQStaysInEditingAndModalInput(t *testing.T) {
+	key := tea.KeyPressMsg{Code: 'q', Text: "q"}
+	for _, vim := range []bool{false, true} {
+		m := testModel(t)
+		m.vim.enabled, m.vim.insert = vim, true
+		m.Update(key)
+		if m.confirmQuit {
+			t.Fatal("typing q opened quit confirmation")
+		}
+		if m.editor.text() != "q" {
+			t.Fatal("editing q did not insert text")
+		}
+	}
+	m := testModel(t)
+	m.vim.enabled = true
+	_, cmd := m.Update(key)
+	if cmd != nil || m.confirmQuit || m.editor.text() != "" {
+		t.Fatal("q quit from the source editor in Normal mode")
+	}
+	m.mode, m.previewFocus, m.vim.enabled = previewMode, true, true
+	m.openNavigation("搜索")
+	m.Update(key)
+	if m.nav.query != "q" || m.confirmQuit {
+		t.Fatal("q did not remain in the search input")
+	}
+	m.Update(press(tea.KeyEscape))
+	m.help = true
+	_, cmd = m.Update(key)
+	if cmd != nil || !m.help || m.confirmQuit {
+		t.Fatal("q quit from the help screen")
+	}
+	m.help = false
+	m.vim.commandOpen = true
+	m.Update(key)
+	if m.vim.command != "q" || m.confirmQuit {
+		t.Fatal("q did not remain in the Vim command input")
+	}
+}
+
+func TestShortcutHintsStayVisibleWithMermaidStatus(t *testing.T) {
+	m := testModel(t)
+	m.mode, m.previewFocus = previewMode, true
+	m.diagrams.binary = "mmdc"
+	m.diagrams.entries = map[string]*mermaidImageEntry{
+		"running": {loading: true, running: true},
+		"cached":  {path: "ready.png", diskHit: true},
+		"failed":  {problem: "mmdc 缺少浏览器，使用字符回退"},
+	}
+	for _, key := range []string{"running", "cached", "failed"} {
+		m.diagramKeys = []string{key}
+		for _, width := range []int{30, 50, 80, 120, 180} {
+			m.width = width
+			footer := m.statusLine("VIM NORMAL · 联动开 · 1:1")
+			for _, want := range []string{"o 目录", "/ 搜索", "q 退出"} {
+				if !strings.Contains(footer, want) {
+					t.Fatalf("%d-column footer lost %q: %s", width, want, footer)
+				}
+			}
+			for _, unwanted := range []string{"mmdc", "缓存", "字符回退", "F4", "F7", "Ctrl+W"} {
+				if strings.Contains(footer, unwanted) {
+					t.Fatal("unexpected footer hint", footer)
+				}
+			}
+			if ansi.StringWidth(footer) > width || ansi.StringWidth(m.headerLine(" MDCLI note.md")) > width {
+				t.Fatal("status exceeded terminal width", width)
+			}
+		}
+	}
+	m.width, m.previewFocus, m.vim.enabled = 180, false, true
+	m.vim.insert = false
+	if footer := m.statusLine("NORMAL"); !strings.Contains(footer, "/ 搜索") || strings.Contains(footer, "q 退出") {
+		t.Fatal("incorrect Normal-mode shortcuts", footer)
+	}
+	m.vim.insert = true
+	if footer := m.statusLine("INSERT"); strings.Contains(footer, "/ 搜索") || !strings.Contains(footer, "Ctrl+Q 退出") {
+		t.Fatal("incorrect insert-mode shortcuts", footer)
+	}
+	m.previewFocus, m.help = true, true
+	if footer := m.statusLine("NORMAL"); strings.Contains(footer, "q 退出") || !strings.Contains(footer, "Esc 返回") {
+		t.Fatal("help advertised a preview-only quit key", footer)
+	}
+	m.help = false
+	m.openNavigation("目录")
+	if footer := m.statusLine("NORMAL"); strings.Contains(footer, "q 退出") || !strings.Contains(footer, "Enter 确认") {
+		t.Fatal("navigation advertised a preview-only quit key", footer)
 	}
 }

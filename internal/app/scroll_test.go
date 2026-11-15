@@ -93,3 +93,17 @@ func TestStaleMappingDoesNotMoveCursor(t *testing.T) {
 		t.Fatal("过期映射不能改变光标")
 	}
 }
+
+func TestMappingDoesNotSplitDiagramBeforeThematicBreak(t *testing.T) {
+	source := "# Heading\n\n```mermaid\ngraph LR\nA-->B\n```\n\n---\n\n## Tail\n"
+	for _, start := range sourceBlocks(source) {
+		if start > 2 && start < 7 {
+			t.Fatalf("block boundary %d splits a Mermaid fence", start)
+		}
+	}
+	c := helperMermaidCache(t)
+	_, images := diagramRenderWithCache(t, c, "kitty", source)
+	if len(images.diagramKeys) != 1 {
+		t.Fatalf("mapping probes created phantom diagrams: %d", len(images.diagramKeys))
+	}
+}

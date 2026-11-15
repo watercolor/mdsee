@@ -48,6 +48,14 @@ func init() {
 	if input == "" || output == "" {
 		os.Exit(3)
 	}
+	if countPath := os.Getenv("MDCLI_MMDC_COUNT"); countPath != "" {
+		file, err := os.OpenFile(countPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			os.Exit(7)
+		}
+		file.WriteString("render\n")
+		file.Close()
+	}
 	data, err := os.ReadFile(input)
 	if err != nil {
 		os.Exit(4)
@@ -309,29 +317,29 @@ func TestMermaidStatusProgressAndCurrentDocument(t *testing.T) {
 	}
 	m.status = "已保存"
 	m.width = 100
-	footer := m.statusLine("VIM NORMAL")
+	header := m.headerLine(" MDCLI note.md")
 	for _, want := range []string{"mmdc 渲染中 1/3", "运行 1", "排队 1"} {
-		if !strings.Contains(footer, want) {
-			t.Fatal(footer)
+		if !strings.Contains(header, want) {
+			t.Fatal(header)
 		}
 	}
 	m.width = 30
-	footer = m.statusLine("VIM NORMAL · 联动开 · 1:1")
-	if !strings.Contains(footer, "渲染 1/3") || ansi.StringWidth(footer) > 30 {
-		t.Fatal(footer)
+	header = m.headerLine(" MDCLI note.md")
+	if !strings.Contains(header, "渲染 1/3") || ansi.StringWidth(header) > 30 {
+		t.Fatal(header)
 	}
 	m.status = ""
 	m.width = 100
 	m.diagramKeys = []string{"ready"}
-	if !strings.Contains(m.statusLine("NORMAL"), "已完成 1/1") {
+	if !strings.Contains(m.headerLine(" MDCLI note.md"), "已完成 1/1") {
 		t.Fatal("other documents must not keep this document pending")
 	}
 	m.diagramKeys = []string{"failed"}
-	if footer := m.statusLine("NORMAL"); !strings.Contains(footer, "缺少浏览器") || !strings.Contains(footer, "字符回退") {
-		t.Fatal(footer)
+	if header := m.headerLine(" MDCLI note.md"); !strings.Contains(header, "缺少浏览器") || !strings.Contains(header, "字符回退") {
+		t.Fatal(header)
 	}
 	m.diagrams.binary = ""
-	if !strings.Contains(m.statusLine("NORMAL"), "未检测到 mmdc") {
+	if !strings.Contains(m.headerLine(" MDCLI note.md"), "未检测到 mmdc") {
 		t.Fatal("missing executable status")
 	}
 	m.switchBuffer(0)

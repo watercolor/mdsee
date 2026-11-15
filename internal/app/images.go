@@ -2,13 +2,14 @@ package app
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	_ "image/gif"
 	_ "image/jpeg"
-	_ "image/png"
+	"image/png"
 	"io"
 	"math"
 	"net/url"
@@ -19,11 +20,13 @@ import (
 	"unicode"
 
 	glamansi "charm.land/glamour/v2/ansi"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/ansi/kitty"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
@@ -131,6 +134,14 @@ var errImageBytesLimit = errors.New("图片超过 10 MiB")
 var errImagePixelsLimit = errors.New("图片超过 800 万像素")
 
 func readLocalImage(path string) (image.Image, error) {
+	raw, err := readLocalImageData(path)
+	if err != nil {
+		return nil, err
+	}
+	return decodeImage(raw)
+}
+
+func readLocalImageData(path string) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("无法读取图片")
@@ -150,7 +161,18 @@ func readLocalImage(path string) (image.Image, error) {
 	if err != nil || len(raw) > maxImageBytes {
 		return nil, fmt.Errorf("图片读取失败或超过 10 MiB")
 	}
-	return decodeImage(raw)
+	return raw, nil
+}
+
+func pngImageBounds(raw []byte) (image.Rectangle, error) {
+	cfg, err := png.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return image.Rectangle{}, fmt.Errorf("PNG 图片头无效")
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxImagePixels {
+		return image.Rectangle{}, errImagePixelsLimit
+	}
+	return image.Rect(0, 0, cfg.Width, cfg.Height), nil
 }
 
 func decodeImage(raw []byte) (image.Image, error) {
@@ -199,7 +221,14 @@ func (r *imageRenderer) renderPreview(destination string, diagramScale int) imag
 	}
 	p := imagePreview{}
 	var img image.Image
-	if network {
+	var originalPNG []byte
+	var bounds image.Rectangle
+	if !network && diagramScale > 0 && r.mode == "kitty" {
+		originalPNG, err = readLocalImageData(path)
+		if err == nil {
+			bounds, err = pngImageBounds(originalPNG)
+		}
+	} else if network {
 		if r.remote == nil {
 			return imagePreview{err: fmt.Errorf("网络图片下载未启用")}
 		}
@@ -218,6 +247,9 @@ func (r *imageRenderer) renderPreview(destination string, diagramScale int) imag
 	if err != nil {
 		p.err = err
 	} else {
+		if img != nil {
+			bounds = img.Bounds()
+		}
 		maxRows := 24
 		if diagramScale > 0 && r.mode == "kitty" {
 			maxRows = 256
@@ -226,10 +258,10 @@ func (r *imageRenderer) renderPreview(destination string, diagramScale int) imag
 		if diagramScale > 0 {
 			// Mermaid's default 16px labels map approximately to two columns for CJK.
 			// Remove PNG density before layout so higher resolution never enlarges the diagram.
-			naturalColumns := max(1, int(math.Ceil(float64(img.Bounds().Dx())/float64(diagramScale)/8)))
+			naturalColumns := max(1, int(math.Ceil(float64(bounds.Dx())/float64(diagramScale)/8)))
 			width = min(width, naturalColumns)
 		}
-		cols, rows := imageDimensions(img.Bounds(), width, r.cellRatio, maxRows)
+		cols, rows := imageDimensions(bounds, width, r.cellRatio, maxRows)
 		if r.mode == "kitty" {
 			id := r.idBase + len(r.ids)
 			// Keep diagram text and thin lines at source resolution for Retina displays.
@@ -239,8 +271,13 @@ func (r *imageRenderer) renderPreview(destination string, diagramScale int) imag
 				transmitted = sampleImage(img, max(1, int(float64(img.Bounds().Dx())*scale)), max(1, int(float64(img.Bounds().Dy())*scale)), color.NRGBA{})
 			}
 			var payload bytes.Buffer
-			err = kitty.EncodeGraphics(&payload, transmitted, &kitty.Options{Action: kitty.TransmitAndPut,
-				ID: id, Transmission: kitty.Direct, Format: kitty.PNG, Quite: 2, Chunk: true, VirtualPlacement: true, Columns: cols, Rows: rows})
+			options := &kitty.Options{Action: kitty.TransmitAndPut,
+				ID: id, Transmission: kitty.Direct, Format: kitty.PNG, Quite: 2, Chunk: true, VirtualPlacement: true, Columns: cols, Rows: rows}
+			if originalPNG != nil {
+				err = writeKittyPNG(&payload, originalPNG, options)
+			} else {
+				err = kitty.EncodeGraphics(&payload, transmitted, options)
+			}
 			if err != nil {
 				p.err = fmt.Errorf("图片编码失败")
 			} else {
@@ -249,15 +286,36 @@ func (r *imageRenderer) renderPreview(destination string, diagramScale int) imag
 				p.rows = kittyImageRows(id, cols, rows)
 			}
 		} else {
-			bg := color.NRGBA{R: 24, G: 24, B: 24, A: 255}
-			if r.theme == "light" {
-				bg = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-			}
+			red, green, blue, _ := lipgloss.Color(paletteFor(r.theme).background).RGBA()
+			bg := color.NRGBA{R: uint8(red >> 8), G: uint8(green >> 8), B: uint8(blue >> 8), A: 255}
 			p.rows = blockImageRows(sampleImage(img, cols, rows*2, bg))
 		}
 	}
 	r.cache[path] = p
 	return p
+}
+
+// Generated PNGs already passed image validation. Send their compressed bytes
+// directly so each render avoids allocating pixels and recompressing the image.
+func writeKittyPNG(w io.Writer, raw []byte, options *kitty.Options) error {
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(raw)))
+	base64.StdEncoding.Encode(encoded, raw)
+	for start := 0; start < len(encoded); start += kitty.MaxChunkSize {
+		end := min(start+kitty.MaxChunkSize, len(encoded))
+		header := []string{fmt.Sprintf("q=%d", options.Quite)}
+		if start == 0 {
+			header = options.Options()
+		}
+		more := "m=0"
+		if end < len(encoded) {
+			more = "m=1"
+		}
+		header = append(header, more)
+		if _, err := io.WriteString(w, ansi.KittyGraphics(encoded[start:end], header...)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func sampleImage(src image.Image, width, height int, background color.NRGBA) *image.NRGBA {
@@ -320,13 +378,15 @@ func deleteImageResources(ids []int) string {
 type imageMarkdownRenderer struct {
 	md     goldmark.Markdown
 	images *imageRenderer
+	code   *codeBlockRenderer
 }
 
 func newImageMarkdownRenderer(width int, style glamansi.StyleConfig, images *imageRenderer) *imageMarkdownRenderer {
-	md := goldmark.New(goldmark.WithExtensions(extension.GFM, extension.DefinitionList))
+	md := goldmark.New(goldmark.WithExtensions(extension.GFM, extension.DefinitionList),
+		goldmark.WithParserOptions(parser.WithAutoHeadingID()))
 	md.SetRenderer(renderer.NewRenderer(renderer.WithNodeRenderers(util.Prioritized(
 		glamansi.NewRenderer(glamansi.Options{WordWrap: max(10, width), Styles: style}), 1000))))
-	return &imageMarkdownRenderer{md: md, images: images}
+	return &imageMarkdownRenderer{md: md, images: images, code: newCodeBlockRenderer(images.theme)}
 }
 
 // Only images occupying their own paragraph expand into rows. Inline images keep
@@ -335,6 +395,7 @@ func (r *imageMarkdownRenderer) Render(source string) (string, error) {
 	raw := []byte(source)
 	root := r.md.Parser().Parse(text.NewReader(raw))
 	raw = r.renderDiagramNodes(raw, root)
+	raw, codeBlocks := replaceCodeNodes(raw, root)
 	prefix := "MI"
 	for strings.Contains(source, prefix) {
 		prefix += "I"
@@ -346,7 +407,7 @@ func (r *imageMarkdownRenderer) Render(source string) (string, error) {
 	var replacements []replacement
 	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		img, ok := node.(*ast.Image)
-		if !entering || !ok {
+		if !entering || !ok || r.images.mode == "off" {
 			return ast.WalkContinue, nil
 		}
 		target := ast.Node(img)
@@ -382,6 +443,10 @@ func (r *imageMarkdownRenderer) Render(source string) (string, error) {
 	lines := strings.Split(out.String(), "\n")
 	var result []string
 	for _, line := range lines {
+		if rows, ok := r.code.replaceLine(line, codeBlocks, r.images.width); ok {
+			result = append(result, rows...)
+			continue
+		}
 		replaced := false
 		for _, p := range replacements {
 			i := strings.Index(line, p.token)

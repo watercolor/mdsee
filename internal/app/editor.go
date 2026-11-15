@@ -210,7 +210,7 @@ func (e *editor) layout(width, height int) {
 
 func (e *editor) gutter() int { return max(4, len(fmt.Sprint(len(e.lines)))+2) }
 
-func (e *editor) view(width, height int) string {
+func (e *editor) view(width, height int, theme string) string {
 	rows := make([]string, height)
 	gutter := e.gutter()
 	for y := 0; y < height; y++ {
@@ -220,7 +220,7 @@ func (e *editor) view(width, height int) string {
 			continue
 		}
 		line := expandTabs(e.lines[i])
-		prefix := lipgloss.NewStyle().Foreground(lipgloss.Color("#7b8496")).Render(fmt.Sprintf("%*d  ", gutter-2, i+1))
+		prefix := lipgloss.NewStyle().Foreground(lipgloss.Color(paletteFor(theme).muted)).Render(fmt.Sprintf("%*d  ", gutter-2, i+1))
 		visible := ansi.Truncate(ansi.Cut(line, e.left, e.left+max(1, width-gutter)), max(1, width-gutter), "")
 		rows[y] = prefix + visible + strings.Repeat(" ", max(0, width-gutter-ansi.StringWidth(visible)))
 	}

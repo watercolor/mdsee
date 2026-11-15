@@ -23,24 +23,28 @@ import (
 type mermaidImageEntry struct {
 	path, dir, problem string
 	scale              int
+	diskHit            bool
 	loading            bool
 	running            bool
 	used               uint64
 	finished           time.Time
+	diskTouched        time.Time
 }
 
 type mermaidImageCache struct {
-	mu          sync.Mutex
-	binary, dir string
-	entries     map[string]*mermaidImageEntry
-	clock       uint64
-	ctx         context.Context
-	cancel      context.CancelFunc
-	workers     chan struct{}
-	updates     chan<- struct{}
-	wg          sync.WaitGroup
-	closeOnce   sync.Once
-	timeout     time.Duration
+	mu           sync.Mutex
+	binary, dir  string
+	disk         *mermaidDiskCache
+	cacheProblem string
+	entries      map[string]*mermaidImageEntry
+	clock        uint64
+	ctx          context.Context
+	cancel       context.CancelFunc
+	workers      chan struct{}
+	updates      chan<- struct{}
+	wg           sync.WaitGroup
+	closeOnce    sync.Once
+	timeout      time.Duration
 }
 
 func newMermaidImageCache(updates chan<- struct{}) *mermaidImageCache {
@@ -85,6 +89,12 @@ func (c *mermaidImageCache) preview(source, theme string, images *imageRenderer)
 			return "", "mmdc 生成中"
 		}
 		if entry.problem == "" {
+			if c.disk != nil && time.Since(entry.diskTouched) >= time.Minute {
+				if err := c.disk.touch(c.ctx, key); err != nil {
+					c.cacheProblem = "磁盘缓存更新失败"
+				}
+				entry.diskTouched = time.Now()
+			}
 			address := (&url.URL{Scheme: "file", Path: filepath.ToSlash(entry.path)}).String()
 			preview := images.renderPreview(address, entry.scale)
 			if preview.err != nil {
@@ -112,6 +122,7 @@ func (c *mermaidImageCache) preview(source, theme string, images *imageRenderer)
 		_ = os.RemoveAll(c.entries[oldest].dir)
 		delete(c.entries, oldest)
 	}
+
 	if c.dir == "" {
 		dir, err := os.MkdirTemp("", "mdcli-mermaid-*")
 		if err != nil {
@@ -119,15 +130,41 @@ func (c *mermaidImageCache) preview(source, theme string, images *imageRenderer)
 		}
 		c.dir = dir
 	}
+	var epoch string
+	if c.disk != nil {
+		data, meta, hit, err := c.disk.load(c.ctx, key)
+		if err != nil {
+			c.cacheProblem = "磁盘缓存读取失败"
+		}
+		if hit {
+			entry, err := c.restoreDisk(data, meta)
+			if err == nil {
+				entry.used = c.clock
+				c.entries[key] = entry
+				address := (&url.URL{Scheme: "file", Path: filepath.ToSlash(entry.path)}).String()
+				if preview := images.renderPreview(address, entry.scale); preview.err == nil {
+					return address, ""
+				}
+				_ = os.RemoveAll(entry.dir)
+				delete(c.entries, key)
+			}
+		}
+		var epochErr error
+		epoch, epochErr = c.disk.epoch(c.ctx)
+		if epochErr != nil {
+			c.cacheProblem = "磁盘缓存不可用"
+		}
+	}
+
 	entry := &mermaidImageEntry{loading: true, used: c.clock}
 	c.entries[key] = entry
 	c.wg.Add(1)
 	c.notify()
-	go c.generate(source, theme, entry)
+	go c.generate(source, theme, epoch, entry)
 	return "", "mmdc 生成中"
 }
 
-func (c *mermaidImageCache) generate(source, theme string, entry *mermaidImageEntry) {
+func (c *mermaidImageCache) generate(source, theme, epoch string, entry *mermaidImageEntry) {
 	defer c.wg.Done()
 	select {
 	case c.workers <- struct{}{}:
@@ -139,6 +176,32 @@ func (c *mermaidImageCache) generate(source, theme string, entry *mermaidImageEn
 	entry.running = true
 	c.mu.Unlock()
 	c.notify()
+	key := mermaidImageKey(source, theme)
+	if c.disk != nil && epoch != "" {
+		lock, err := c.disk.renderLock(c.ctx, c.disk.key(key))
+		if err == nil {
+			defer lock.Close()
+			data, meta, hit, loadErr := c.disk.load(c.ctx, key)
+			if loadErr == nil && hit {
+				c.mu.Lock()
+				restored, restoreErr := c.restoreDisk(data, meta)
+				if restoreErr == nil {
+					*entry = *restored
+					entry.used = c.clock
+				}
+				c.mu.Unlock()
+				if restoreErr == nil {
+					c.notify()
+					return
+				}
+			}
+		} else if c.ctx.Err() == nil {
+			c.mu.Lock()
+			c.cacheProblem = "磁盘缓存锁定失败"
+			c.mu.Unlock()
+			epoch = ""
+		}
+	}
 	dir, err := os.MkdirTemp(c.dir, "diagram-*")
 	path := filepath.Join(dir, "diagram.png")
 	var logs bytes.Buffer
@@ -175,10 +238,18 @@ func (c *mermaidImageCache) generate(source, theme string, entry *mermaidImageEn
 		}
 		_ = os.Remove(input)
 	}
+	if err == nil && c.disk != nil && epoch != "" {
+		if cacheErr := c.disk.publish(c.ctx, key, path, renderScale, epoch); cacheErr != nil {
+			c.mu.Lock()
+			c.cacheProblem = "磁盘缓存写入失败"
+			c.mu.Unlock()
+		}
+	}
 	c.mu.Lock()
 	entry.loading = false
 	entry.running = false
 	entry.finished = time.Now()
+	entry.diskTouched = entry.finished
 	entry.dir = dir
 	if err == nil {
 		entry.path = path
@@ -200,6 +271,9 @@ func (c *mermaidImageCache) generate(source, theme string, entry *mermaidImageEn
 }
 
 func (r *imageMarkdownRenderer) renderDiagramNodes(raw []byte, root ast.Node) []byte {
+	if r.images.mode == "off" {
+		return raw
+	}
 	var codes []*ast.FencedCodeBlock
 	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if code, ok := node.(*ast.FencedCodeBlock); entering && ok && string(code.Language(raw)) == "mermaid" {
@@ -246,7 +320,7 @@ func (r *imageMarkdownRenderer) renderDiagramNodes(raw []byte, root ast.Node) []
 }
 
 func mermaidImageKey(source, theme string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(theme+"\x00"+source)))
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(theme+"\x00"+strings.ReplaceAll(source, "\r\n", "\n"))))
 }
 
 func (c *mermaidImageCache) notify() {
@@ -259,11 +333,23 @@ func (c *mermaidImageCache) notify() {
 type mermaidProgress struct {
 	failure                                   string
 	total, completed, failed, running, queued int
+	hits                                      int
+	cacheProblem                              string
 	detected                                  bool
 }
 
 func (p mermaidProgress) pending() bool { return p.running+p.queued > 0 }
 func (p mermaidProgress) message() string {
+	result := p.renderMessage()
+	if p.hits > 0 {
+		result += fmt.Sprintf(" · 缓存命中 %d", p.hits)
+	}
+	if p.cacheProblem != "" {
+		result += " · " + p.cacheProblem
+	}
+	return result
+}
+func (p mermaidProgress) renderMessage() string {
 	if !p.detected {
 		return "未检测到 mmdc · Mermaid 字符渲染"
 	}
@@ -280,6 +366,13 @@ func (p mermaidProgress) message() string {
 	return fmt.Sprintf("mmdc 已完成 %d/%d", p.completed, p.total)
 }
 func (p mermaidProgress) compact() string {
+	result := p.compactMessage()
+	if p.hits > 0 {
+		result += fmt.Sprintf(" 缓存%d", p.hits)
+	}
+	return result
+}
+func (p mermaidProgress) compactMessage() string {
 	if !p.detected {
 		return "Mermaid 字符渲染"
 	}
@@ -299,6 +392,7 @@ func (c *mermaidImageCache) progress(keys []string) mermaidProgress {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	p.detected = c.binary != ""
+	p.cacheProblem = c.cacheProblem
 	if !p.detected {
 		return p
 	}
@@ -318,6 +412,9 @@ func (c *mermaidImageCache) progress(keys []string) mermaidProgress {
 			}
 		default:
 			p.completed++
+			if entry.diskHit {
+				p.hits++
+			}
 		}
 	}
 	return p
@@ -338,4 +435,40 @@ func (w *boundedMermaidLog) Write(data []byte) (int, error) {
 		}
 	}
 	return size, nil
+}
+
+func (c *mermaidImageCache) configureDisk(root string, limit int64) {
+	if limit <= 0 {
+		return
+	}
+	if root == "" {
+		var err error
+		root, err = defaultMermaidCacheDir()
+		if err != nil {
+			c.cacheProblem = "磁盘缓存目录不可用"
+			return
+		}
+	}
+	disk := &mermaidDiskCache{root: root, limit: limit, renderer: mermaidRendererIdentity(c.binary)}
+	if err := disk.prune(c.ctx); err != nil {
+		c.cacheProblem = "磁盘缓存不可用"
+		return
+	}
+	c.disk = disk
+}
+
+// Retain a session-local snapshot so clearing or evicting disk entries cannot
+// remove an image currently being read, displayed, or used by scroll-map probes.
+func (c *mermaidImageCache) restoreDisk(data []byte, meta mermaidDiskMetadata) (*mermaidImageEntry, error) {
+	dir, err := os.MkdirTemp(c.dir, "diagram-*")
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, "diagram.png")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	now := time.Now()
+	return &mermaidImageEntry{path: path, dir: dir, scale: meta.Scale, diskHit: true, finished: now, diskTouched: now}, nil
 }

@@ -493,6 +493,16 @@ func TestKittyThroughBubbleTeaRenderer(t *testing.T) {
 
 func decodeKittyUpload(t *testing.T, output string) image.Image {
 	t.Helper()
+	data := kittyUploadData(t, output)
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Kitty upload must contain a decodable PNG (%d bytes): %v", len(data), err)
+	}
+	return img
+}
+
+func kittyUploadData(t *testing.T, output string) []byte {
+	t.Helper()
 	var encoded strings.Builder
 	started := false
 	for _, part := range strings.Split(output, "\x1b_G")[1:] {
@@ -516,11 +526,58 @@ func decodeKittyUpload(t *testing.T, output string) image.Image {
 	if err != nil {
 		t.Fatal(err)
 	}
-	img, err := png.Decode(bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("Kitty upload must contain a decodable PNG (%d bytes): %v", len(data), err)
+	return data
+}
+
+func TestKittyDiagramTransmitsOriginalPNG(t *testing.T) {
+	for _, size := range []int{4, 64, 128} {
+		img := image.NewNRGBA(image.Rect(0, 0, size, size))
+		var original bytes.Buffer
+		encoder := png.Encoder{CompressionLevel: png.NoCompression}
+		if err := encoder.Encode(&original, img); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "diagram.png")
+		if err := os.WriteFile(path, original.Bytes(), 0600); err != nil {
+			t.Fatal(err)
+		}
+		r := newImageRenderer("kitty", path, "dark", 80, 0x123400, .5)
+		if preview := r.renderPreview(path, 3); preview.err != nil {
+			t.Fatal(preview.err)
+		}
+		if transmitted := kittyUploadData(t, r.graphics.String()); !bytes.Equal(transmitted, original.Bytes()) {
+			t.Fatalf("%dpx diagram was re-encoded", size)
+		}
 	}
-	return img
+}
+
+func TestKittyPNGChunkBoundaries(t *testing.T) {
+	for _, size := range []int{1, 3072, 3073, 6144} {
+		raw := bytes.Repeat([]byte{42}, size)
+		var output bytes.Buffer
+		options := &kitty.Options{Action: kitty.TransmitAndPut, Format: kitty.PNG, Quite: 2,
+			ID: 42, VirtualPlacement: true, Columns: 20, Rows: 10}
+		if err := writeKittyPNG(&output, raw, options); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(kittyUploadData(t, output.String()), raw) {
+			t.Fatalf("chunk boundary corrupted %d-byte payload", size)
+		}
+		chunks := strings.Split(output.String(), "\x1b_G")[1:]
+		for i, chunk := range chunks {
+			command, _, _ := strings.Cut(chunk, "\x1b\\")
+			header, payload, _ := strings.Cut(command, ";")
+			if len(payload) > kitty.MaxChunkSize || len(payload)%4 != 0 {
+				t.Fatalf("invalid chunk length %d", len(payload))
+			}
+			if (i < len(chunks)-1) != strings.Contains(header, "m=1") {
+				t.Fatal("incorrect continuation flag", header)
+			}
+			if i > 0 && strings.Contains(header, "a=T") {
+				t.Fatal("continuation repeated image options", header)
+			}
+		}
+	}
 }
 
 func TestKittyDiagramPreservesPixelsAndScrollableHeight(t *testing.T) {

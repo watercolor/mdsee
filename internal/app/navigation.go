@@ -462,10 +462,8 @@ func (m *model) directoryView() string {
 	selected := min(m.nav.selected, max(0, len(items)-1))
 	start := max(0, min(selected-capacity/2, len(items)-capacity))
 	end := min(len(items), start+capacity)
-	bg, fg, border, selection := "#222638", "#c4cbe3", "#65708e", "#454d68"
-	if m.theme == "light" {
-		bg, fg, border, selection = "#f1f5f9", "#253047", "#64748b", "#cbd5e1"
-	}
+	p := paletteFor(m.theme)
+	bg, fg, border, selection := p.overlay, p.foreground, p.border, p.selection
 	base := lipgloss.NewStyle().Background(lipgloss.Color(bg)).Foreground(lipgloss.Color(fg)).Width(inner)
 	title := fmt.Sprintf("目录 (%d/%d)", min(selected+1, len(items)), len(items))
 	lines := []string{base.Bold(true).Render(clipped(title, inner))}

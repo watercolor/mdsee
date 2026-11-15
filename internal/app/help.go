@@ -39,7 +39,7 @@ func (m *model) helpSections() ([]helpSection, []helpSection) {
 			}},
 		}
 	}
-	save := []helpBinding{{"Ctrl+S / F2", "保存文件"}, {"Ctrl+Q", "退出，有修改时提示"}}
+	save := []helpBinding{{"Ctrl+S / F2", "保存文件"}, {"q / Ctrl+Q", "预览焦点下退出 / 全局退出"}, {"S / D / Esc", "退出提示中保存 / 放弃 / 返回"}}
 	if m.vim.enabled {
 		save = append(save, helpBinding{":w / :wq", "保存 / 保存并退出"}, helpBinding{":q / :q!", "安全退出 / 放弃修改退出"})
 	} else {
@@ -60,15 +60,16 @@ func (m *model) helpSections() ([]helpSection, []helpSection) {
 	return left, right
 }
 
-func renderHelpSections(sections []helpSection, width int) string {
-	accent := lipgloss.Color("#67c8b3")
+func renderHelpSections(sections []helpSection, width int, theme string) string {
+	p := paletteFor(theme)
+	accent := lipgloss.Color(p.headings[1])
 	title := lipgloss.NewStyle().Foreground(accent).Bold(true)
 	keyWidth := min(18, width/2)
 	keys := lipgloss.NewStyle().Bold(true).Width(keyWidth)
 	description := lipgloss.NewStyle().Width(width - keyWidth - 1)
 	var groups []string
 	for _, section := range sections {
-		lines := []string{title.Render(section.title), lipgloss.NewStyle().Foreground(lipgloss.Color("#515b70")).Render(strings.Repeat("─", width))}
+		lines := []string{title.Render(section.title), lipgloss.NewStyle().Foreground(lipgloss.Color(p.border)).Render(strings.Repeat("─", width))}
 		for _, binding := range section.bindings {
 			lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, keys.Render(binding.key), " ", description.Render(binding.action)))
 		}
@@ -88,9 +89,9 @@ func (m *model) resizeHelp() {
 	var content string
 	if width >= 88 {
 		column := (width - 3) / 2
-		content = lipgloss.JoinHorizontal(lipgloss.Top, renderHelpSections(left, column), "   ", renderHelpSections(right, width-column-3))
+		content = lipgloss.JoinHorizontal(lipgloss.Top, renderHelpSections(left, column, m.theme), "   ", renderHelpSections(right, width-column-3, m.theme))
 	} else {
-		content = renderHelpSections(append(left, right...), width)
+		content = renderHelpSections(append(left, right...), width, m.theme)
 	}
 	note := "粘贴使用终端快捷键。LaTeX：$...$ 行内，$$...$$ 块公式。"
 	if m.vim.enabled {
@@ -103,8 +104,9 @@ func (m *model) resizeHelp() {
 func (m *model) helpPanel() string {
 	width := min(104, m.width)
 	inner := max(1, width-4)
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#67c8b3")).Render(clipped("快捷键指南 · "+m.vim.label(), inner))
+	p := paletteFor(m.theme)
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(p.headings[1])).Render(clipped("快捷键指南 · "+m.vim.label(), inner))
 	nav := fmt.Sprintf("F1/Esc 关闭 · ↑↓ 滚动 · %.0f%%", 100*m.helpViewport.ScrollPercent())
-	panel := lipgloss.NewStyle().Width(width).Height(m.bodyHeight+3).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#515b70")).Render(title + "\n" + m.helpViewport.View() + "\n" + clipped(nav, inner))
+	panel := lipgloss.NewStyle().Width(width).Height(m.bodyHeight+3).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.border)).Render(title + "\n" + m.helpViewport.View() + "\n" + clipped(nav, inner))
 	return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, panel)
 }
